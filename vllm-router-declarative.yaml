@@ -1,0 +1,256 @@
+# ConfigMap to store build and run scripts
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vllm-router-scripts
+data:
+  build-and-run.sh: |
+    #!/bin/bash
+    set -e
+
+    echo "🏗️ Preparing to build vLLM Router..."
+
+    # Install system dependencies first
+    echo "Installing system dependencies..."
+    apt-get update -qq
+    apt-get install -y -qq \
+        curl \
+        git \
+        build-essential \
+        gcc \
+        libc6-dev \
+        pkg-config \
+        libssl-dev \
+        procps \
+        netcat-openbsd
+
+    # Install Rust
+    echo "Installing Rust..."
+    export CARGO_HOME="/workspace/.cargo"
+    export RUSTUP_HOME="/workspace/.rustup"
+    if [ ! -d "$CARGO_HOME" ]; then
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
+    fi
+    source /workspace/.cargo/env
+
+    # Verify Rust installation
+    rustc --version
+    cargo --version
+
+    # Wait for source code to be copied
+    echo "⏳ Waiting for source code to be copied to /workspace/vllm-router..."
+    while [ ! -d "/workspace/vllm-router" ] || [ ! -f "/workspace/vllm-router/Cargo.toml" ]; do
+        echo "Source code not found, waiting..."
+        sleep 10
+    done
+
+    cd /workspace/vllm-router
+    echo "✅ Source code found, starting build..."
+
+    # Build the router
+    echo "Building vllm-router (this may take several minutes)..."
+    cargo build --release
+
+    echo "✅ Build completed successfully!"
+
+    # Start the router
+    echo "🚀 Starting vllm-router..."
+    exec ./target/release/vllm-router \
+        --host 0.0.0.0 \
+        --port 8080 \
+        --worker-urls http://vllm-service.default.svc.cluster.local:8000 \
+        --prometheus-host 0.0.0.0 \
+        --prometheus-port 29000 \
+        --log-level info
+
+  copy-source.sh: |
+    #!/bin/bash
+    # This script will be used to copy local source when needed
+    echo "Source code should be copied here via: kubectl cp"
+    echo "For now, using placeholder - you'll copy actual source code"
+
+---
+# Deployment for vLLM Router
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-router-deployment
+  namespace: default
+  labels:
+    app: vllm-router
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vllm-router
+  template:
+    metadata:
+      labels:
+        app: vllm-router
+    spec:
+      initContainers:
+      # Init container to wait for vLLM service to be ready
+      - name: wait-for-vllm
+        image: busybox:1.35
+        command: ['sh', '-c']
+        args:
+        - |
+          echo "Waiting for vLLM service to be ready..."
+          until nc -z vllm-service.default.svc.cluster.local 8000; do
+            echo "vLLM service not ready, waiting..."
+            sleep 5
+          done
+          echo "vLLM service is ready!"
+      containers:
+      - name: vllm-router
+        image: python:3.11
+        command: ["/bin/bash"]
+        args: ["/scripts/build-and-run.sh"]
+        ports:
+        - containerPort: 8080
+          name: http
+        - containerPort: 29000
+          name: metrics
+        env:
+        - name: RUST_LOG
+          value: "info"
+        - name: CARGO_HOME
+          value: "/workspace/.cargo"
+        - name: PATH
+          value: "/workspace/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        volumeMounts:
+        - name: workspace
+          mountPath: /workspace
+        - name: scripts
+          mountPath: /scripts
+        - name: cargo-cache
+          mountPath: /workspace/.cargo
+        resources:
+          requests:
+            cpu: "1"
+            memory: "4Gi"
+          limits:
+            cpu: "4"
+            memory: "8Gi"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 300  # Allow time for building
+          periodSeconds: 30
+          timeoutSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 120  # Allow time for building
+          periodSeconds: 10
+          timeoutSeconds: 5
+      volumes:
+      - name: workspace
+        emptyDir:
+          sizeLimit: "10Gi"  # Space for source code and build artifacts
+      - name: scripts
+        configMap:
+          name: vllm-router-scripts
+          defaultMode: 0755
+      - name: cargo-cache
+        emptyDir:
+          sizeLimit: "2Gi"  # Cargo cache for faster rebuilds
+      # Deploy to same node as vLLM for low latency (remove if you want different nodes)
+      # affinity:
+      #   podAffinity:
+      #     preferredDuringSchedulingIgnoredDuringExecution:
+      #     - weight: 100
+      #       podAffinityTerm:
+      #         labelSelector:
+      #           matchExpressions:
+      #           - key: app
+      #             operator: In
+      #             values: ["vllm"]
+      #         topologyKey: kubernetes.io/hostname
+
+---
+# Service for vLLM Router
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-router-service
+  labels:
+    app: vllm-router
+spec:
+  selector:
+    app: vllm-router
+  ports:
+  - name: http
+    protocol: TCP
+    port: 8080
+    targetPort: 8080
+    nodePort: 30081
+  - name: metrics
+    protocol: TCP
+    port: 29000
+    targetPort: 29000
+    nodePort: 30082
+  type: NodePort
+
+---
+# Script to help with local development workflow
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vllm-router-dev-help
+data:
+  README.md: |
+    # vLLM Router Development Workflow
+
+    ## Initial Deployment
+    ```bash
+    kubectl apply -f vllm-router-declarative.yaml
+    ```
+
+    ## Copy Local Changes
+    ```bash
+    # Copy your local vllm-router source to the running pod
+    kubectl cp /Users/congc/gitrepos/vllm-router vllm-router-deployment-<pod-id>:/workspace/ --no-preserve=true
+
+    # Get pod name:
+    kubectl get pods -l app=vllm-router
+    ```
+
+    ## Rebuild After Changes
+    ```bash
+    # Restart the deployment to trigger rebuild
+    kubectl rollout restart deployment/vllm-router-deployment
+
+    # Or manually rebuild in the pod:
+    kubectl exec -it deployment/vllm-router-deployment -- bash -c "
+      cd /workspace/vllm-router
+      source ~/.cargo/env
+      cargo build --release
+      pkill vllm-router || true
+      nohup ./target/release/vllm-router --host 0.0.0.0 --port 8080 --worker-urls http://vllm-service.default.svc.cluster.local:8000 > /tmp/router.log 2>&1 &
+    "
+    ```
+
+    ## Check Status
+    ```bash
+    # Check pod status
+    kubectl get pods -l app=vllm-router
+
+    # Check router logs
+    kubectl logs -l app=vllm-router -f
+
+    # Check if router is responding
+    kubectl exec deployment/vllm-router-deployment -- curl -s http://localhost:8080/health
+
+    # Access externally
+    curl http://35.93.104.231:30081/health
+    ```
+
+    ## Development Iteration
+    1. Make changes to local code
+    2. Copy to pod: `kubectl cp . POD_NAME:/workspace/vllm-router --no-preserve=true`
+    3. Rebuild: `kubectl exec POD_NAME -- bash -c "cd /workspace/vllm-router && source ~/.cargo/env && cargo build --release"`
+    4. Restart router process in pod
+    5. Test changes

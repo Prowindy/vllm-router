@@ -1,0 +1,55 @@
+# vLLM Router deployment using local source files
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vllm-router
+  labels:
+    app: vllm-router
+spec:
+  containers:
+  - name: vllm-router
+    image: python:3.11
+    command: ["/bin/bash", "-c", "while true; do sleep 30; done"]  # Keep container running
+    ports:
+    - containerPort: 8080
+      name: http
+    - containerPort: 29000
+      name: metrics
+    env:
+    - name: RUST_LOG
+      value: "info"
+    volumeMounts:
+    - name: workspace
+      mountPath: /workspace
+    resources:
+      requests:
+        cpu: "1"
+        memory: "2Gi"
+      limits:
+        cpu: "4"
+        memory: "8Gi"
+    workingDir: /workspace
+  volumes:
+  - name: workspace
+    emptyDir: {}
+  restartPolicy: Never
+
+---
+# Service to expose vLLM Router
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-router-service
+spec:
+  selector:
+    app: vllm-router
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+    nodePort: 30081
+  - name: metrics
+    port: 29000
+    targetPort: 29000
+    nodePort: 30082
+  type: NodePort
