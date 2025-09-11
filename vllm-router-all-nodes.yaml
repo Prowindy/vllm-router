@@ -1,0 +1,135 @@
+# vLLM Router deployment connecting to ALL 8 vLLM servers
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vllm-router-all-nodes
+  labels:
+    app: vllm-router-all-nodes
+    node-role: vllm-router
+spec:
+  containers:
+  - name: vllm-router
+    image: python:3.11
+    command: ["/bin/bash", "-c"]
+    args:
+    - |
+      set -e
+      echo "🏗️ Setting up vLLM Router to manage ALL 8 vLLM servers..."
+
+      # Install system dependencies
+      echo "Installing system dependencies..."
+      apt-get update -qq
+      apt-get install -y -qq \
+          curl \
+          git \
+          build-essential \
+          gcc \
+          libc6-dev \
+          pkg-config \
+          libssl-dev \
+          procps \
+          netcat-openbsd \
+          protobuf-compiler
+
+      # Install Rust
+      echo "Installing Rust..."
+      export CARGO_HOME="/workspace/.cargo"
+      export RUSTUP_HOME="/workspace/.rustup"
+      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
+      source /workspace/.cargo/env
+
+      echo "Rust installed successfully:"
+      rustc --version
+      cargo --version
+
+      # Wait for source code to be copied
+      echo "⏳ Waiting for source code to be copied to /workspace/vllm-router..."
+      while [ ! -d "/workspace/vllm-router" ] || [ ! -f "/workspace/vllm-router/Cargo.toml" ]; do
+          echo "Source code not found, waiting 10 seconds..."
+          sleep 10
+      done
+
+      echo "✅ Source code found! Building vLLM Router..."
+      cd /workspace/vllm-router
+
+      # Build the router
+      echo "Building vllm-router (this may take several minutes)..."
+      cargo build --release
+
+      echo "✅ Build completed successfully!"
+
+      # Start the router with ALL 8 vLLM servers
+      echo "🚀 Starting vLLM Router connected to ALL 8 vLLM servers..."
+      echo "📊 Load balancing across:"
+      echo "  • Node 1: http://10.100.131.95:8000"
+      echo "  • Node 3: http://10.100.55.225:8000"
+      echo "  • Node 4: http://10.100.52.81:8000"
+      echo "  • Node 5: http://10.100.70.186:8000"
+      echo "  • Node 6: http://10.100.117.245:8000"
+      echo "  • Node 7: http://10.100.141.91:8000"
+      echo "  • Node 8: http://10.100.19.174:8000"
+      echo "  • Node 9: http://10.100.69.15:8000"
+
+      exec ./target/release/vllm-router \
+          --host 0.0.0.0 \
+          --port 8080 \
+          --worker-urls http://10.100.131.95:8000 http://10.100.55.225:8000 http://10.100.52.81:8000 http://10.100.70.186:8000 http://10.100.117.245:8000 http://10.100.141.91:8000 http://10.100.19.174:8000 http://10.100.69.15:8000 \
+          --prometheus-host 0.0.0.0 \
+          --prometheus-port 29000 \
+          --log-level info
+    ports:
+    - containerPort: 8080
+      name: http
+    - containerPort: 29000
+      name: metrics
+    env:
+    - name: RUST_LOG
+      value: "info"
+    - name: CARGO_HOME
+      value: "/workspace/.cargo"
+    - name: RUSTUP_HOME
+      value: "/workspace/.rustup"
+    - name: PATH
+      value: "/workspace/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    volumeMounts:
+    - name: workspace
+      mountPath: /workspace
+    resources:
+      requests:
+        cpu: "1"
+        memory: "4Gi"
+      limits:
+        cpu: "4"
+        memory: "8Gi"
+  volumes:
+  - name: workspace
+    emptyDir:
+      sizeLimit: "10Gi"
+  # Pin to Node 2 specifically (same as before)
+  nodeSelector:
+    kubernetes.io/hostname: ip-192-168-88-39.us-west-2.compute.internal
+  restartPolicy: Never
+
+---
+# Service to expose vLLM Router managing all nodes
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-router-all-nodes-service
+  labels:
+    app: vllm-router-all-nodes
+spec:
+  selector:
+    app: vllm-router-all-nodes
+  ports:
+  - name: http
+    protocol: TCP
+    port: 8080
+    targetPort: 8080
+    nodePort: 30090
+  - name: metrics
+    protocol: TCP
+    port: 29000
+    targetPort: 29000
+    nodePort: 30091
+  type: NodePort
