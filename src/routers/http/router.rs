@@ -325,8 +325,12 @@ impl Router {
         for url in worker_urls {
             match Self::get_worker_dp_size(url, api_key) {
                 Ok(dp_size) => {
-                    for i in 0..dp_size {
-                        dp_aware_workers.push(format!("{}@{}", url, i));
+                    // VALIDATION: Only use ranks 0, 2, 4, 6 out of 8 total ranks for testing
+                    let selected_ranks = [0, 2, 4, 6];
+                    for &rank in &selected_ranks {
+                        if rank < dp_size {
+                            dp_aware_workers.push(format!("{}@{}", url, rank));
+                        }
                     }
                 }
                 Err(e) => return Err(format!("Failed to get DP size for {}: {}", url, e)),
