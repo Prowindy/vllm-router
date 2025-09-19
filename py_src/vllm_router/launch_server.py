@@ -13,9 +13,9 @@ import requests
 from setproctitle import setproctitle
 from vllm_router.launch_router import RouterArgs, launch_router
 
-from vllm.srt.entrypoints.http_server import launch_server
-from vllm.srt.server_args import ServerArgs
-from vllm.srt.utils import is_port_available
+from sglang.srt.entrypoints.http_server import launch_server
+from sglang.srt.server_args import ServerArgs
+from sglang.srt.utils import is_port_available
 
 
 def setup_logger():
@@ -68,9 +68,9 @@ def run_server(server_args, dp_rank):
     # create new process group
     os.setpgrp()
 
-    setproctitle("vllm::server")
-    # Set vLLMANG_DP_RANK environment variable
-    os.environ["vLLMANG_DP_RANK"] = str(dp_rank)
+    setproctitle("sglang::server")
+    # Set SGLANG_DP_RANK environment variable
+    os.environ["SGLANG_DP_RANK"] = str(dp_rank)
 
     launch_server(server_args)
 
@@ -147,7 +147,7 @@ def main():
     mp.set_start_method("spawn")
 
     parser = argparse.ArgumentParser(
-        description="Launch vLLM router and server processes"
+        description="Launch VLLM router and server processes"
     )
 
     ServerArgs.add_cli_args(parser)

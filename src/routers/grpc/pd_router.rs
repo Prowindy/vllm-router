@@ -1,46 +1,35 @@
 // PD (Prefill-Decode) gRPC Router Implementation
 
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::RwLock;
-use std::time::Duration;
-
-use async_trait::async_trait;
-use axum::body::Body;
-use axum::extract::Request;
-use axum::http::HeaderMap;
-use axum::http::StatusCode;
-use axum::response::IntoResponse;
-use axum::response::Response;
-use tracing::info;
-use tracing::warn;
-
-use crate::config::types::CircuitBreakerConfig as ConfigCircuitBreakerConfig;
-use crate::config::types::HealthCheckConfig as ConfigHealthCheckConfig;
 use crate::config::types::RetryConfig;
-use crate::core::BasicWorker;
-use crate::core::CircuitBreakerConfig;
-use crate::core::HealthChecker;
-use crate::core::HealthConfig;
-use crate::core::Worker;
-use crate::core::WorkerType;
+use crate::core::{
+    BasicWorker, CircuitBreakerConfig, HealthChecker, HealthConfig, Worker, WorkerType,
+};
 use crate::grpc::VllmSchedulerClient;
 use crate::metrics::RouterMetrics;
 use crate::policies::LoadBalancingPolicy;
 use crate::reasoning_parser::ParserFactory;
-use crate::routers::RouterTrait;
-use crate::routers::WorkerManagement;
-use crate::tokenizer::factory;
+use crate::routers::{RouterTrait, WorkerManagement};
 use crate::tokenizer::traits::Tokenizer;
 use crate::tool_parser::ParserRegistry;
+use async_trait::async_trait;
+use axum::{
+    body::Body,
+    extract::Request,
+    http::{HeaderMap, StatusCode},
+    response::{IntoResponse, Response},
+};
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
+use std::time::Duration;
+use tracing::{info, warn};
 
-/// gRPC PD (Prefill-Decode) router implementation for vLLM
+/// gRPC PD (Prefill-Decode) router implementation for SGLang
 #[allow(dead_code)] // Fields will be used once implementation is complete
 pub struct GrpcPDRouter {
     /// Prefill worker connections
-    prefill_workers: Arc<RwLock<Vec<Box<dyn Worker>>>>,
+    prefill_workers: Arc<RwLock<Vec<Arc<dyn Worker>>>>,
     /// Decode worker connections
-    decode_workers: Arc<RwLock<Vec<Box<dyn Worker>>>>,
+    decode_workers: Arc<RwLock<Vec<Arc<dyn Worker>>>>,
     /// gRPC clients for prefill workers
     prefill_grpc_clients: Arc<RwLock<HashMap<String, VllmSchedulerClient>>>,
     /// gRPC clients for decode workers
@@ -69,35 +58,33 @@ pub struct GrpcPDRouter {
 
 impl GrpcPDRouter {
     /// Create a new gRPC PD router
-    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         prefill_urls: Vec<(String, Option<u16>)>,
         decode_urls: Vec<String>,
         prefill_policy: Arc<dyn LoadBalancingPolicy>,
         decode_policy: Arc<dyn LoadBalancingPolicy>,
-        timeout_secs: u64,
-        interval_secs: u64,
-        dp_aware: bool,
-        api_key: Option<String>,
-        retry_config: RetryConfig,
-        circuit_breaker_config: ConfigCircuitBreakerConfig,
-        health_check_config: ConfigHealthCheckConfig,
-        tokenizer_path_or_model: String,
+        ctx: &Arc<crate::server::AppContext>,
     ) -> Result<Self, String> {
         // Update metrics
         RouterMetrics::set_active_workers(prefill_urls.len() + decode_urls.len());
 
-        // Initialize tokenizer
-        let tokenizer = factory::create_tokenizer(&tokenizer_path_or_model)
-            .map_err(|e| format!("Failed to create tokenizer: {}", e))?;
-
-        // Initialize reasoning parser factory
-        let reasoning_parser_factory = ParserFactory::new();
-
-        // Get tool parser registry
-        let tool_parser_registry = ParserRegistry::new();
+        // Extract necessary components from context
+        let tokenizer = ctx
+            .tokenizer
+            .as_ref()
+            .ok_or_else(|| "gRPC PD router requires tokenizer".to_string())?
+            .clone();
+        let reasoning_parser_factory = ctx
+            .reasoning_parser_factory
+            .as_ref()
+            .ok_or_else(|| "gRPC PD router requires reasoning parser factory".to_string())?
+            .clone();
+        let tool_parser_registry = ctx
+            .tool_parser_registry
+            .ok_or_else(|| "gRPC PD router requires tool parser registry".to_string())?;
 
         // Convert config CircuitBreakerConfig to core CircuitBreakerConfig
+        let circuit_breaker_config = ctx.router_config.effective_circuit_breaker_config();
         let core_cb_config = CircuitBreakerConfig {
             failure_threshold: circuit_breaker_config.failure_threshold,
             success_threshold: circuit_breaker_config.success_threshold,
@@ -140,7 +127,7 @@ impl GrpcPDRouter {
         }
 
         // Create Prefill Worker trait objects with gRPC connection mode
-        let prefill_workers: Vec<Box<dyn Worker>> = prefill_urls
+        let prefill_workers: Vec<Arc<dyn Worker>> = prefill_urls
             .iter()
             .map(|(url, bootstrap_port)| {
                 let worker = BasicWorker::with_connection_mode(
@@ -154,18 +141,18 @@ impl GrpcPDRouter {
                 )
                 .with_circuit_breaker_config(core_cb_config.clone())
                 .with_health_config(HealthConfig {
-                    timeout_secs: health_check_config.timeout_secs,
-                    check_interval_secs: health_check_config.check_interval_secs,
-                    endpoint: health_check_config.endpoint.clone(),
-                    failure_threshold: health_check_config.failure_threshold,
-                    success_threshold: health_check_config.success_threshold,
+                    timeout_secs: ctx.router_config.health_check.timeout_secs,
+                    check_interval_secs: ctx.router_config.health_check.check_interval_secs,
+                    endpoint: ctx.router_config.health_check.endpoint.clone(),
+                    failure_threshold: ctx.router_config.health_check.failure_threshold,
+                    success_threshold: ctx.router_config.health_check.success_threshold,
                 });
-                Box::new(worker) as Box<dyn Worker>
+                Arc::new(worker) as Arc<dyn Worker>
             })
             .collect();
 
         // Create Decode Worker trait objects with gRPC connection mode
-        let decode_workers: Vec<Box<dyn Worker>> = decode_urls
+        let decode_workers: Vec<Arc<dyn Worker>> = decode_urls
             .iter()
             .map(|url| {
                 let worker = BasicWorker::with_connection_mode(
@@ -175,13 +162,13 @@ impl GrpcPDRouter {
                 )
                 .with_circuit_breaker_config(core_cb_config.clone())
                 .with_health_config(HealthConfig {
-                    timeout_secs: health_check_config.timeout_secs,
-                    check_interval_secs: health_check_config.check_interval_secs,
-                    endpoint: health_check_config.endpoint.clone(),
-                    failure_threshold: health_check_config.failure_threshold,
-                    success_threshold: health_check_config.success_threshold,
+                    timeout_secs: ctx.router_config.health_check.timeout_secs,
+                    check_interval_secs: ctx.router_config.health_check.check_interval_secs,
+                    endpoint: ctx.router_config.health_check.endpoint.clone(),
+                    failure_threshold: ctx.router_config.health_check.failure_threshold,
+                    success_threshold: ctx.router_config.health_check.success_threshold,
                 });
-                Box::new(worker) as Box<dyn Worker>
+                Arc::new(worker) as Arc<dyn Worker>
             })
             .collect();
 
@@ -203,10 +190,14 @@ impl GrpcPDRouter {
         let prefill_workers = Arc::new(RwLock::new(prefill_workers));
         let decode_workers = Arc::new(RwLock::new(decode_workers));
 
-        let prefill_health_checker =
-            crate::core::start_health_checker(Arc::clone(&prefill_workers), interval_secs);
-        let decode_health_checker =
-            crate::core::start_health_checker(Arc::clone(&decode_workers), interval_secs);
+        let prefill_health_checker = crate::core::start_health_checker(
+            Arc::clone(&prefill_workers),
+            ctx.router_config.worker_startup_check_interval_secs,
+        );
+        let decode_health_checker = crate::core::start_health_checker(
+            Arc::clone(&decode_workers),
+            ctx.router_config.worker_startup_check_interval_secs,
+        );
 
         Ok(GrpcPDRouter {
             prefill_workers,
@@ -220,11 +211,11 @@ impl GrpcPDRouter {
             tool_parser_registry,
             _prefill_health_checker: Some(prefill_health_checker),
             _decode_health_checker: Some(decode_health_checker),
-            timeout_secs,
-            interval_secs,
-            dp_aware,
-            api_key,
-            retry_config,
+            timeout_secs: ctx.router_config.worker_startup_timeout_secs,
+            interval_secs: ctx.router_config.worker_startup_check_interval_secs,
+            dp_aware: ctx.router_config.dp_aware,
+            api_key: ctx.router_config.api_key.clone(),
+            retry_config: ctx.router_config.effective_retry_config(),
             circuit_breaker_config: core_cb_config,
         })
     }
@@ -278,6 +269,7 @@ impl RouterTrait for GrpcPDRouter {
         &self,
         _headers: Option<&HeaderMap>,
         _body: &crate::protocols::spec::GenerateRequest,
+        _model_id: Option<&str>,
     ) -> Response {
         (StatusCode::NOT_IMPLEMENTED).into_response()
     }
@@ -286,6 +278,7 @@ impl RouterTrait for GrpcPDRouter {
         &self,
         _headers: Option<&HeaderMap>,
         _body: &crate::protocols::spec::ChatCompletionRequest,
+        _model_id: Option<&str>,
     ) -> Response {
         (StatusCode::NOT_IMPLEMENTED).into_response()
     }
@@ -294,15 +287,43 @@ impl RouterTrait for GrpcPDRouter {
         &self,
         _headers: Option<&HeaderMap>,
         _body: &crate::protocols::spec::CompletionRequest,
+        _model_id: Option<&str>,
     ) -> Response {
         (StatusCode::NOT_IMPLEMENTED).into_response()
     }
 
-    async fn route_embeddings(&self, _headers: Option<&HeaderMap>, _body: Body) -> Response {
+    async fn route_responses(
+        &self,
+        _headers: Option<&HeaderMap>,
+        _body: &crate::protocols::spec::ResponsesRequest,
+        _model_id: Option<&str>,
+    ) -> Response {
         (StatusCode::NOT_IMPLEMENTED).into_response()
     }
 
-    async fn route_rerank(&self, _headers: Option<&HeaderMap>, _body: Body) -> Response {
+    async fn get_response(&self, _headers: Option<&HeaderMap>, _response_id: &str) -> Response {
+        (StatusCode::NOT_IMPLEMENTED).into_response()
+    }
+
+    async fn cancel_response(&self, _headers: Option<&HeaderMap>, _response_id: &str) -> Response {
+        (StatusCode::NOT_IMPLEMENTED).into_response()
+    }
+
+    async fn route_embeddings(
+        &self,
+        _headers: Option<&HeaderMap>,
+        _body: &crate::protocols::spec::EmbeddingRequest,
+        _model_id: Option<&str>,
+    ) -> Response {
+        (StatusCode::NOT_IMPLEMENTED).into_response()
+    }
+
+    async fn route_rerank(
+        &self,
+        _headers: Option<&HeaderMap>,
+        _body: &crate::protocols::spec::RerankRequest,
+        _model_id: Option<&str>,
+    ) -> Response {
         (StatusCode::NOT_IMPLEMENTED).into_response()
     }
 

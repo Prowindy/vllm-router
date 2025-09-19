@@ -1,23 +1,6 @@
-# vLLM Router
+# VLLM Router
 
-**Built on SGLang Router Foundation**
-
-vLLM router is a high-performance request routing system for vLLM deployments, adapted from the excellent [SGLang router](https://github.com/sgl-project/sglang/tree/main/sgl-router). This router enables data parallelism across vLLM instances, providing advanced load balancing and specialized routing for modern LLM serving architectures.
-
-## Attribution and Acknowledgments
-
-This project is built upon the foundational work of the SGLang router, developed by the SGLang team. We deeply appreciate their innovative design and open-source contribution to the LLM serving ecosystem. Key aspects adapted from SGLang router include:
-
-- **Core Architecture**: Request routing framework and async processing patterns
-- **API Design**: Compatible API surface for easy migration between SGLang and vLLM
-- **Load Balancing Policies**: Multiple routing algorithms including cache-aware, power of two, consistent hashing, random, and round robin
-- **Prefill-Decode Disaggregation**: Specialized routing for separated prefill and decode phases
-- **Service Discovery**: Kubernetes-native worker management and health monitoring
-- **Advanced Features**: Circuit breakers, retry logic, metrics collection, and tool parsing
-
-Both SGLang and vLLM projects use the Apache-2.0 license, enabling this collaborative adaptation. This router maintains API compatibility with SGLang router to facilitate easy transitions for users between the two ecosystems and foster potential future unification.
-
-**Credits**: The SGLang team explicitly acknowledges learning from vLLM and other projects, demonstrating the collaborative spirit of open-source development that this project continues.
+VLLM router is a standalone Rust module that enables data parallelism across VLLM instances, providing high-performance request routing and advanced load balancing. The router supports multiple load balancing algorithms including cache-aware, power of two, random, and round robin, and acts as a specialized load balancer for prefill-decode disaggregated serving architectures.
 
 ## Documentation
 
@@ -62,6 +45,7 @@ python -m build && pip install --force-reinstall dist/*.whl
 #### Option B: Development Mode
 
 ```bash
+# Currently broken
 pip install -e .
 ```
 
@@ -394,6 +378,7 @@ Set `rust-analyzer.linkedProjects` to the absolute path of `Cargo.toml`:
 The continuous integration pipeline includes comprehensive testing, benchmarking, and publishing:
 
 #### Build & Test
+
 1. **Build Wheels**: Uses `cibuildwheel` for manylinux x86_64 packages
 2. **Build Source Distribution**: Creates source distribution for pip fallback
 3. **Rust HTTP Server Benchmarking**: Performance testing of router overhead
@@ -405,12 +390,10 @@ The continuous integration pipeline includes comprehensive testing, benchmarking
 - **Container Images**: Docker images published using `/docker/Dockerfile.router`
 
 ## Features
-
 - **High Performance**: Rust-based routing with connection pooling and optimized request handling
 - **Advanced Load Balancing**: Multiple algorithms including:
   - **Cache-Aware**: Intelligent routing based on cache locality for optimal performance
   - **Power of Two**: Chooses the less loaded of two randomly selected workers
-  - **Consistent Hash**: Routes requests based on session_id/user_id for stateful processing
   - **Random**: Distributes requests randomly across available workers
   - **Round Robin**: Sequential distribution across workers in rotation
 - **Prefill-Decode Disaggregation**: Specialized load balancing for separated prefill and decode servers

@@ -1,12 +1,10 @@
-use std::collections::HashMap;
-
-use serde::Deserialize;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 
 // # Protocol Specifications
 //
-// This module contains all protocol definitions for OpenAI and vLLM APIs.
+// This module contains all protocol definitions for OpenAI and SGLang APIs.
 //
 // ## Table of Contents
 //
@@ -35,12 +33,18 @@ use serde_json::Value;
 //    - Logprobs Types
 //    - Error Response Types
 //
-// 5. **vLLMANG SPEC - GENERATE API**
+// 5. **SGLANG SPEC - GENERATE API**
 //    - Generate Parameters
 //    - Sampling Parameters
 //    - Request/Response structures
 //
-// 6. **COMMON**
+// 6. **SGLANG SPEC - RERANK API**
+//    - Request/Response structures
+//
+// 7. **OPENAI SPEC - Embeddings API**
+//    - Request structures
+//
+// 8. **COMMON**
 //    - GenerationRequest trait
 //    - StringOrArray & LoRAPath types
 //    - Helper functions
@@ -76,7 +80,7 @@ pub enum ChatMessage {
         tool_calls: Option<Vec<ToolCall>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         function_call: Option<FunctionCallResponse>,
-        /// Reasoning content for O1-style models (vLLM extension)
+        /// Reasoning content for O1-style models (SGLang extension)
         #[serde(skip_serializing_if = "Option::is_none")]
         reasoning_content: Option<String>,
     },
@@ -148,7 +152,7 @@ pub struct ChatMessageDelta {
     pub tool_calls: Option<Vec<ToolCallDelta>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub function_call: Option<FunctionCallDelta>,
-    /// Reasoning content delta for O1-style models (vLLM extension)
+    /// Reasoning content delta for O1-style models (SGLang extension)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_content: Option<String>,
 }
@@ -267,7 +271,7 @@ pub struct ChatCompletionRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub function_call: Option<FunctionCall>,
 
-    // ============= vLLM Extensions =============
+    // ============= VLLM Extensions =============
     /// Top-k sampling parameter (-1 to disable)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_k: Option<i32>,
@@ -312,7 +316,7 @@ pub struct ChatCompletionRequest {
     #[serde(default = "default_true")]
     pub skip_special_tokens: bool,
 
-    // ============= vLLM Extensions =============
+    // ============= VLLM Extensions =============
     /// Path to LoRA adapter(s) for model customization
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lora_path: Option<LoRAPath>,
@@ -329,6 +333,10 @@ pub struct ChatCompletionRequest {
     #[serde(default = "default_true")]
     pub stream_reasoning: bool,
 
+    /// Chat template kwargs
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chat_template_kwargs: Option<HashMap<String, serde_json::Value>>,
+
     /// Return model hidden states
     #[serde(default)]
     pub return_hidden_states: bool,
@@ -344,43 +352,19 @@ impl GenerationRequest for ChatCompletionRequest {
     }
 
     fn extract_text_for_routing(&self) -> String {
-        // Extract text from messages for routing decisions
-        self.messages
-            .iter()
-            .filter_map(|msg| match msg {
-                ChatMessage::System { content, .. } => Some(content.clone()),
-                ChatMessage::User { content, .. } => match content {
-                    UserMessageContent::Text(text) => Some(text.clone()),
-                    UserMessageContent::Parts(parts) => {
-                        let texts: Vec<String> = parts
-                            .iter()
-                            .filter_map(|part| match part {
-                                ContentPart::Text { text } => Some(text.clone()),
-                                _ => None,
-                            })
-                            .collect();
-                        Some(texts.join(" "))
-                    }
-                },
-                ChatMessage::Assistant {
-                    content,
-                    reasoning_content,
-                    ..
-                } => {
-                    // Combine content and reasoning content for routing decisions
-                    let main_content = content.clone().unwrap_or_default();
-                    let reasoning = reasoning_content.clone().unwrap_or_default();
-                    if main_content.is_empty() && reasoning.is_empty() {
-                        None
-                    } else {
-                        Some(format!("{} {}", main_content, reasoning).trim().to_string())
+        // Use session_id from session_params for session-based routing
+        if let Some(ref session_params) = self.session_params {
+            if let Some(session_id) = session_params.get("session_id") {
+                if let Some(session_id_str) = session_id.as_str() {
+                    if !session_id_str.trim().is_empty() {
+                        return session_id_str.to_string();
                     }
                 }
-                ChatMessage::Tool { content, .. } => Some(content.clone()),
-                ChatMessage::Function { content, .. } => Some(content.clone()),
-            })
-            .collect::<Vec<String>>()
-            .join(" ")
+            }
+        }
+
+        // Return empty string if no session_id - let routing policy handle this case
+        String::new()
     }
 }
 
@@ -409,7 +393,7 @@ pub struct ChatChoice {
     /// Information about which stop condition was matched
     #[serde(skip_serializing_if = "Option::is_none")]
     pub matched_stop: Option<serde_json::Value>, // Can be string or integer
-    /// Hidden states from the model (vLLM extension)
+    /// Hidden states from the model (SGLang extension)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hidden_states: Option<Vec<f32>>,
 }
@@ -445,7 +429,7 @@ pub struct ChatStreamChoice {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CompletionRequest {
-    /// ID of the model to use (required for OpenAI, optional for some implementations, such as vLLM)
+    /// ID of the model to use (required for OpenAI, optional for some implementations, such as SGLang)
     pub model: String,
 
     /// The prompt(s) to generate completions for
@@ -515,7 +499,7 @@ pub struct CompletionRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seed: Option<i64>,
 
-    // ============= vLLM Extensions =============
+    // ============= VLLM Extensions =============
     /// Top-k sampling parameter (-1 to disable)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_k: Option<i32>,
@@ -560,7 +544,7 @@ pub struct CompletionRequest {
     #[serde(default = "default_true")]
     pub skip_special_tokens: bool,
 
-    // ============= vLLM Extensions =============
+    // ============= VLLM Extensions =============
     /// Path to LoRA adapter(s) for model customization
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lora_path: Option<LoRAPath>,
@@ -620,7 +604,7 @@ pub struct CompletionChoice {
     /// Information about which stop condition was matched
     #[serde(skip_serializing_if = "Option::is_none")]
     pub matched_stop: Option<serde_json::Value>, // Can be string or integer
-    /// Hidden states from the model (vLLM extension)
+    /// Hidden states from the model (SGLang extension)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hidden_states: Option<Vec<f32>>,
 }
@@ -1017,7 +1001,7 @@ pub struct ResponsesRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
 
-    // ============= vLLM Extensions =============
+    // ============= VLLM Extensions =============
     /// Request ID
     #[serde(default = "generate_request_id")]
     pub request_id: String,
@@ -1634,7 +1618,7 @@ pub struct ErrorDetail {
 }
 
 // ==================================================================
-// =            vLLMANG SPEC - GENERATE API                          =
+// =            SGLANG SPEC - GENERATE API                          =
 // ==================================================================
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1722,7 +1706,7 @@ pub struct GenerateRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt: Option<StringOrArray>,
 
-    /// Text input - vLLM native format
+    /// Text input - SGLang native format
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
 
@@ -1734,7 +1718,7 @@ pub struct GenerateRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parameters: Option<GenerateParameters>,
 
-    /// Sampling parameters (vllm style)
+    /// Sampling parameters (sglang style)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sampling_params: Option<SamplingParams>,
 
@@ -1746,7 +1730,7 @@ pub struct GenerateRequest {
     #[serde(default)]
     pub return_logprob: bool,
 
-    // ============= vLLM Extensions =============
+    // ============= VLLM Extensions =============
     /// Path to LoRA adapter(s) for model customization
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lora_path: Option<LoRAPath>,
@@ -1775,19 +1759,20 @@ impl GenerationRequest for GenerateRequest {
     }
 
     fn extract_text_for_routing(&self) -> String {
-        // Include session_params for consistent hashing
-        let mut routing_data = serde_json::Map::new();
+        // Check fields in priority order: text, prompt, inputs
+        if let Some(ref text) = self.text {
+            return text.clone();
+        }
 
-        // Add text content first
-        let text_content = if let Some(ref text) = self.text {
-            text.clone()
-        } else if let Some(ref prompt) = self.prompt {
-            match prompt {
+        if let Some(ref prompt) = self.prompt {
+            return match prompt {
                 StringOrArray::String(s) => s.clone(),
                 StringOrArray::Array(v) => v.join(" "),
-            }
-        } else if let Some(ref input_ids) = self.input_ids {
-            match input_ids {
+            };
+        }
+
+        if let Some(ref input_ids) = self.input_ids {
+            return match input_ids {
                 InputIds::Single(ids) => ids
                     .iter()
                     .map(|&id| id.to_string())
@@ -1798,34 +1783,267 @@ impl GenerationRequest for GenerateRequest {
                     .flat_map(|batch| batch.iter().map(|&id| id.to_string()))
                     .collect::<Vec<String>>()
                     .join(" "),
-            }
-        } else {
-            String::new()
-        };
-
-        routing_data.insert("text".to_string(), serde_json::Value::String(text_content));
-
-        // Add session_params if present for routing decisions
-        if let Some(ref session_params) = self.session_params {
-            routing_data.insert(
-                "session_params".to_string(),
-                serde_json::Value::Object(
-                    session_params
-                        .iter()
-                        .map(|(k, v)| (k.clone(), v.clone()))
-                        .collect(),
-                ),
-            );
+            };
         }
 
-        // Serialize to JSON string for routing
-        serde_json::to_string(&routing_data).unwrap_or_else(|_| {
-            routing_data
-                .get("text")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string()
-        })
+        // No text input found
+        String::new()
+    }
+}
+
+// ==================================================================
+// =            SGLANG SPEC - RERANK API                            =
+// ==================================================================
+
+// Constants for rerank API
+pub const DEFAULT_MODEL_NAME: &str = "default";
+
+/// Rerank request for scoring documents against a query
+/// Used for RAG systems and document relevance scoring
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RerankRequest {
+    /// The query text to rank documents against
+    pub query: String,
+
+    /// List of documents to be ranked
+    pub documents: Vec<String>,
+
+    /// Model to use for reranking
+    #[serde(default = "default_model_name")]
+    pub model: String,
+
+    /// Maximum number of documents to return (optional)
+    pub top_k: Option<usize>,
+
+    /// Whether to return documents in addition to scores
+    #[serde(default = "default_return_documents")]
+    pub return_documents: bool,
+
+    // SGLang specific extensions
+    /// Request ID for tracking
+    pub rid: Option<StringOrArray>,
+
+    /// User identifier
+    pub user: Option<String>,
+}
+
+fn default_model_name() -> String {
+    DEFAULT_MODEL_NAME.to_string()
+}
+
+fn default_return_documents() -> bool {
+    true
+}
+
+/// Individual rerank result
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RerankResult {
+    /// Relevance score for the document
+    pub score: f32,
+
+    /// The document text (if return_documents was true)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub document: Option<String>,
+
+    /// Original index of the document in the request
+    pub index: usize,
+
+    /// Additional metadata about the ranking
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub meta_info: Option<HashMap<String, Value>>,
+}
+
+/// Rerank response containing sorted results
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RerankResponse {
+    /// Ranked results sorted by score (highest first)
+    pub results: Vec<RerankResult>,
+
+    /// Model used for reranking
+    pub model: String,
+
+    /// Usage information
+    pub usage: Option<UsageInfo>,
+
+    /// Response object type
+    #[serde(default = "default_rerank_object")]
+    pub object: String,
+
+    /// Response ID
+    pub id: Option<StringOrArray>,
+
+    /// Creation timestamp
+    pub created: i64,
+}
+
+fn default_rerank_object() -> String {
+    "rerank".to_string()
+}
+
+/// V1 API compatibility format for rerank requests
+/// Matches Python's V1RerankReqInput
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct V1RerankReqInput {
+    pub query: String,
+    pub documents: Vec<String>,
+}
+
+/// Convert V1RerankReqInput to RerankRequest
+impl From<V1RerankReqInput> for RerankRequest {
+    fn from(v1: V1RerankReqInput) -> Self {
+        RerankRequest {
+            query: v1.query,
+            documents: v1.documents,
+            model: default_model_name(),
+            top_k: None,
+            return_documents: true,
+            rid: None,
+            user: None,
+        }
+    }
+}
+
+/// Implementation of GenerationRequest trait for RerankRequest
+impl GenerationRequest for RerankRequest {
+    fn get_model(&self) -> Option<&str> {
+        Some(&self.model)
+    }
+
+    fn is_stream(&self) -> bool {
+        false // Reranking doesn't support streaming
+    }
+
+    fn extract_text_for_routing(&self) -> String {
+        self.query.clone()
+    }
+}
+
+impl RerankRequest {
+    pub fn validate(&self) -> Result<(), String> {
+        // Validate query is not empty
+        if self.query.trim().is_empty() {
+            return Err("Query cannot be empty".to_string());
+        }
+
+        // Validate documents list
+        if self.documents.is_empty() {
+            return Err("Documents list cannot be empty".to_string());
+        }
+
+        // Validate top_k if specified
+        if let Some(k) = self.top_k {
+            if k == 0 {
+                return Err("top_k must be greater than 0".to_string());
+            }
+            if k > self.documents.len() {
+                // This is allowed but we log a warning
+                tracing::warn!(
+                    "top_k ({}) is greater than number of documents ({})",
+                    k,
+                    self.documents.len()
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Get the effective top_k value
+    pub fn effective_top_k(&self) -> usize {
+        self.top_k.unwrap_or(self.documents.len())
+    }
+}
+
+impl RerankResponse {
+    pub fn new(
+        results: Vec<RerankResult>,
+        model: String,
+        request_id: Option<StringOrArray>,
+    ) -> Self {
+        RerankResponse {
+            results,
+            model,
+            usage: None,
+            object: default_rerank_object(),
+            id: request_id,
+            created: current_timestamp(),
+        }
+    }
+
+    /// Sort results by score in descending order
+    pub fn sort_by_score(&mut self) {
+        self.results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+    }
+
+    /// Apply top_k limit to results
+    pub fn apply_top_k(&mut self, k: usize) {
+        self.results.truncate(k);
+    }
+
+    /// Drop documents from results
+    pub fn drop_documents(&mut self) {
+        self.results.iter_mut().for_each(|result| {
+            result.document = None;
+        });
+    }
+}
+
+// ==================================================================
+// =            OPENAI SPEC - Embeddings API                        =
+// ==================================================================
+
+/// Embeddings request compatible with OpenAI API
+/// We intentionally keep fields flexible to pass through to workers.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct EmbeddingRequest {
+    /// ID of the model to use
+    pub model: String,
+
+    /// Input can be a string, array of strings, tokens, or batch inputs
+    pub input: serde_json::Value,
+
+    /// Optional encoding format (e.g., "float", "base64")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub encoding_format: Option<String>,
+
+    /// Optional user identifier
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
+
+    /// Optional number of dimensions for the embedding
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dimensions: Option<u32>,
+
+    /// SGLang extension: request id for tracking
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rid: Option<String>,
+}
+
+impl GenerationRequest for EmbeddingRequest {
+    fn is_stream(&self) -> bool {
+        // Embeddings are non-streaming
+        false
+    }
+
+    fn get_model(&self) -> Option<&str> {
+        Some(&self.model)
+    }
+
+    fn extract_text_for_routing(&self) -> String {
+        // Best effort: extract text content for routing decisions
+        match &self.input {
+            serde_json::Value::String(s) => s.clone(),
+            serde_json::Value::Array(arr) => arr
+                .iter()
+                .filter_map(|v| v.as_str())
+                .collect::<Vec<_>>()
+                .join(" "),
+            _ => String::new(),
+        }
     }
 }
 
@@ -1851,7 +2069,7 @@ pub trait GenerationRequest: Send + Sync {
 }
 
 /// Helper type for string or array of strings
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(untagged)]
 pub enum StringOrArray {
     String(String),
@@ -1883,10 +2101,750 @@ impl StringOrArray {
     }
 }
 
-/// LoRA adapter path - can be single path or batch of paths (vLLM extension)
+/// LoRA adapter path - can be single path or batch of paths (SGLang extension)
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum LoRAPath {
     Single(Option<String>),
     Batch(Vec<Option<String>>),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json;
+
+    // ==================================================================
+    // =            RERANK REQUEST TESTS                                =
+    // ==================================================================
+
+    #[test]
+    fn test_rerank_request_serialization() {
+        let request = RerankRequest {
+            query: "test query".to_string(),
+            documents: vec!["doc1".to_string(), "doc2".to_string()],
+            model: "test-model".to_string(),
+            top_k: Some(5),
+            return_documents: true,
+            rid: Some(StringOrArray::String("req-123".to_string())),
+            user: Some("user-456".to_string()),
+        };
+
+        let serialized = serde_json::to_string(&request).unwrap();
+        let deserialized: RerankRequest = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(deserialized.query, request.query);
+        assert_eq!(deserialized.documents, request.documents);
+        assert_eq!(deserialized.model, request.model);
+        assert_eq!(deserialized.top_k, request.top_k);
+        assert_eq!(deserialized.return_documents, request.return_documents);
+        assert_eq!(deserialized.rid, request.rid);
+        assert_eq!(deserialized.user, request.user);
+    }
+
+    #[test]
+    fn test_rerank_request_deserialization_with_defaults() {
+        let json = r#"{
+            "query": "test query",
+            "documents": ["doc1", "doc2"]
+        }"#;
+
+        let request: RerankRequest = serde_json::from_str(json).unwrap();
+
+        assert_eq!(request.query, "test query");
+        assert_eq!(request.documents, vec!["doc1", "doc2"]);
+        assert_eq!(request.model, default_model_name());
+        assert_eq!(request.top_k, None);
+        assert!(request.return_documents);
+        assert_eq!(request.rid, None);
+        assert_eq!(request.user, None);
+    }
+
+    #[test]
+    fn test_rerank_request_validation_success() {
+        let request = RerankRequest {
+            query: "valid query".to_string(),
+            documents: vec!["doc1".to_string(), "doc2".to_string()],
+            model: "test-model".to_string(),
+            top_k: Some(2),
+            return_documents: true,
+            rid: None,
+            user: None,
+        };
+
+        assert!(request.validate().is_ok());
+    }
+
+    #[test]
+    fn test_rerank_request_validation_empty_query() {
+        let request = RerankRequest {
+            query: "".to_string(),
+            documents: vec!["doc1".to_string()],
+            model: "test-model".to_string(),
+            top_k: None,
+            return_documents: true,
+            rid: None,
+            user: None,
+        };
+
+        let result = request.validate();
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "Query cannot be empty");
+    }
+
+    #[test]
+    fn test_rerank_request_validation_whitespace_query() {
+        let request = RerankRequest {
+            query: "   ".to_string(),
+            documents: vec!["doc1".to_string()],
+            model: "test-model".to_string(),
+            top_k: None,
+            return_documents: true,
+            rid: None,
+            user: None,
+        };
+
+        let result = request.validate();
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "Query cannot be empty");
+    }
+
+    #[test]
+    fn test_rerank_request_validation_empty_documents() {
+        let request = RerankRequest {
+            query: "test query".to_string(),
+            documents: vec![],
+            model: "test-model".to_string(),
+            top_k: None,
+            return_documents: true,
+            rid: None,
+            user: None,
+        };
+
+        let result = request.validate();
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "Documents list cannot be empty");
+    }
+
+    #[test]
+    fn test_rerank_request_validation_top_k_zero() {
+        let request = RerankRequest {
+            query: "test query".to_string(),
+            documents: vec!["doc1".to_string(), "doc2".to_string()],
+            model: "test-model".to_string(),
+            top_k: Some(0),
+            return_documents: true,
+            rid: None,
+            user: None,
+        };
+
+        let result = request.validate();
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "top_k must be greater than 0");
+    }
+
+    #[test]
+    fn test_rerank_request_validation_top_k_greater_than_docs() {
+        let request = RerankRequest {
+            query: "test query".to_string(),
+            documents: vec!["doc1".to_string(), "doc2".to_string()],
+            model: "test-model".to_string(),
+            top_k: Some(5),
+            return_documents: true,
+            rid: None,
+            user: None,
+        };
+
+        // This should pass but log a warning
+        assert!(request.validate().is_ok());
+    }
+
+    #[test]
+    fn test_rerank_request_effective_top_k() {
+        let request = RerankRequest {
+            query: "test query".to_string(),
+            documents: vec!["doc1".to_string(), "doc2".to_string(), "doc3".to_string()],
+            model: "test-model".to_string(),
+            top_k: Some(2),
+            return_documents: true,
+            rid: None,
+            user: None,
+        };
+
+        assert_eq!(request.effective_top_k(), 2);
+    }
+
+    #[test]
+    fn test_rerank_request_effective_top_k_none() {
+        let request = RerankRequest {
+            query: "test query".to_string(),
+            documents: vec!["doc1".to_string(), "doc2".to_string(), "doc3".to_string()],
+            model: "test-model".to_string(),
+            top_k: None,
+            return_documents: true,
+            rid: None,
+            user: None,
+        };
+
+        assert_eq!(request.effective_top_k(), 3);
+    }
+
+    // ==================================================================
+    // =            RERANK RESPONSE TESTS                               =
+    // ==================================================================
+
+    #[test]
+    fn test_rerank_response_creation() {
+        let results = vec![
+            RerankResult {
+                score: 0.8,
+                document: Some("doc1".to_string()),
+                index: 0,
+                meta_info: None,
+            },
+            RerankResult {
+                score: 0.6,
+                document: Some("doc2".to_string()),
+                index: 1,
+                meta_info: None,
+            },
+        ];
+
+        let response = RerankResponse::new(
+            results.clone(),
+            "test-model".to_string(),
+            Some(StringOrArray::String("req-123".to_string())),
+        );
+
+        assert_eq!(response.results.len(), 2);
+        assert_eq!(response.model, "test-model");
+        assert_eq!(
+            response.id,
+            Some(StringOrArray::String("req-123".to_string()))
+        );
+        assert_eq!(response.object, "rerank");
+        assert!(response.created > 0);
+    }
+
+    #[test]
+    fn test_rerank_response_serialization() {
+        let results = vec![RerankResult {
+            score: 0.8,
+            document: Some("doc1".to_string()),
+            index: 0,
+            meta_info: None,
+        }];
+
+        let response = RerankResponse::new(
+            results,
+            "test-model".to_string(),
+            Some(StringOrArray::String("req-123".to_string())),
+        );
+
+        let serialized = serde_json::to_string(&response).unwrap();
+        let deserialized: RerankResponse = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(deserialized.results.len(), response.results.len());
+        assert_eq!(deserialized.model, response.model);
+        assert_eq!(deserialized.id, response.id);
+        assert_eq!(deserialized.object, response.object);
+    }
+
+    #[test]
+    fn test_rerank_response_sort_by_score() {
+        let results = vec![
+            RerankResult {
+                score: 0.6,
+                document: Some("doc2".to_string()),
+                index: 1,
+                meta_info: None,
+            },
+            RerankResult {
+                score: 0.8,
+                document: Some("doc1".to_string()),
+                index: 0,
+                meta_info: None,
+            },
+            RerankResult {
+                score: 0.4,
+                document: Some("doc3".to_string()),
+                index: 2,
+                meta_info: None,
+            },
+        ];
+
+        let mut response = RerankResponse::new(
+            results,
+            "test-model".to_string(),
+            Some(StringOrArray::String("req-123".to_string())),
+        );
+
+        response.sort_by_score();
+
+        assert_eq!(response.results[0].score, 0.8);
+        assert_eq!(response.results[0].index, 0);
+        assert_eq!(response.results[1].score, 0.6);
+        assert_eq!(response.results[1].index, 1);
+        assert_eq!(response.results[2].score, 0.4);
+        assert_eq!(response.results[2].index, 2);
+    }
+
+    #[test]
+    fn test_rerank_response_apply_top_k() {
+        let results = vec![
+            RerankResult {
+                score: 0.8,
+                document: Some("doc1".to_string()),
+                index: 0,
+                meta_info: None,
+            },
+            RerankResult {
+                score: 0.6,
+                document: Some("doc2".to_string()),
+                index: 1,
+                meta_info: None,
+            },
+            RerankResult {
+                score: 0.4,
+                document: Some("doc3".to_string()),
+                index: 2,
+                meta_info: None,
+            },
+        ];
+
+        let mut response = RerankResponse::new(
+            results,
+            "test-model".to_string(),
+            Some(StringOrArray::String("req-123".to_string())),
+        );
+
+        response.apply_top_k(2);
+
+        assert_eq!(response.results.len(), 2);
+        assert_eq!(response.results[0].score, 0.8);
+        assert_eq!(response.results[1].score, 0.6);
+    }
+
+    #[test]
+    fn test_rerank_response_apply_top_k_larger_than_results() {
+        let results = vec![RerankResult {
+            score: 0.8,
+            document: Some("doc1".to_string()),
+            index: 0,
+            meta_info: None,
+        }];
+
+        let mut response = RerankResponse::new(
+            results,
+            "test-model".to_string(),
+            Some(StringOrArray::String("req-123".to_string())),
+        );
+
+        response.apply_top_k(5);
+
+        assert_eq!(response.results.len(), 1);
+    }
+
+    #[test]
+    fn test_rerank_response_drop_documents() {
+        let results = vec![RerankResult {
+            score: 0.8,
+            document: Some("doc1".to_string()),
+            index: 0,
+            meta_info: None,
+        }];
+        let mut response = RerankResponse::new(
+            results,
+            "test-model".to_string(),
+            Some(StringOrArray::String("req-123".to_string())),
+        );
+
+        response.drop_documents();
+
+        assert_eq!(response.results[0].document, None);
+    }
+
+    // ==================================================================
+    // =            RERANK RESULT TESTS                                 =
+    // ==================================================================
+
+    #[test]
+    fn test_rerank_result_serialization() {
+        let result = RerankResult {
+            score: 0.85,
+            document: Some("test document".to_string()),
+            index: 42,
+            meta_info: Some(HashMap::from([
+                ("confidence".to_string(), Value::String("high".to_string())),
+                (
+                    "processing_time".to_string(),
+                    Value::Number(serde_json::Number::from(150)),
+                ),
+            ])),
+        };
+
+        let serialized = serde_json::to_string(&result).unwrap();
+        let deserialized: RerankResult = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(deserialized.score, result.score);
+        assert_eq!(deserialized.document, result.document);
+        assert_eq!(deserialized.index, result.index);
+        assert_eq!(deserialized.meta_info, result.meta_info);
+    }
+
+    #[test]
+    fn test_rerank_result_serialization_without_document() {
+        let result = RerankResult {
+            score: 0.85,
+            document: None,
+            index: 42,
+            meta_info: None,
+        };
+
+        let serialized = serde_json::to_string(&result).unwrap();
+        let deserialized: RerankResult = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(deserialized.score, result.score);
+        assert_eq!(deserialized.document, result.document);
+        assert_eq!(deserialized.index, result.index);
+        assert_eq!(deserialized.meta_info, result.meta_info);
+    }
+
+    // ==================================================================
+    // =            V1 COMPATIBILITY TESTS                              =
+    // ==================================================================
+
+    #[test]
+    fn test_v1_rerank_req_input_serialization() {
+        let v1_input = V1RerankReqInput {
+            query: "test query".to_string(),
+            documents: vec!["doc1".to_string(), "doc2".to_string()],
+        };
+
+        let serialized = serde_json::to_string(&v1_input).unwrap();
+        let deserialized: V1RerankReqInput = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(deserialized.query, v1_input.query);
+        assert_eq!(deserialized.documents, v1_input.documents);
+    }
+
+    #[test]
+    fn test_v1_to_rerank_request_conversion() {
+        let v1_input = V1RerankReqInput {
+            query: "test query".to_string(),
+            documents: vec!["doc1".to_string(), "doc2".to_string()],
+        };
+
+        let request: RerankRequest = v1_input.into();
+
+        assert_eq!(request.query, "test query");
+        assert_eq!(request.documents, vec!["doc1", "doc2"]);
+        assert_eq!(request.model, default_model_name());
+        assert_eq!(request.top_k, None);
+        assert!(request.return_documents);
+        assert_eq!(request.rid, None);
+        assert_eq!(request.user, None);
+    }
+
+    // ==================================================================
+    // =            GENERATION REQUEST TRAIT TESTS                      =
+    // ==================================================================
+
+    #[test]
+    fn test_rerank_request_generation_request_trait() {
+        let request = RerankRequest {
+            query: "test query".to_string(),
+            documents: vec!["doc1".to_string()],
+            model: "test-model".to_string(),
+            top_k: None,
+            return_documents: true,
+            rid: None,
+            user: None,
+        };
+
+        assert_eq!(request.get_model(), Some("test-model"));
+        assert!(!request.is_stream());
+        assert_eq!(request.extract_text_for_routing(), "test query");
+    }
+
+    // ==================================================================
+    // =            EDGE CASES AND STRESS TESTS                         =
+    // ==================================================================
+
+    #[test]
+    fn test_rerank_request_very_long_query() {
+        let long_query = "a".repeat(100000);
+        let request = RerankRequest {
+            query: long_query,
+            documents: vec!["doc1".to_string()],
+            model: "test-model".to_string(),
+            top_k: None,
+            return_documents: true,
+            rid: None,
+            user: None,
+        };
+
+        assert!(request.validate().is_ok());
+    }
+
+    #[test]
+    fn test_rerank_request_many_documents() {
+        let documents: Vec<String> = (0..1000).map(|i| format!("doc{}", i)).collect();
+        let request = RerankRequest {
+            query: "test query".to_string(),
+            documents,
+            model: "test-model".to_string(),
+            top_k: Some(100),
+            return_documents: true,
+            rid: None,
+            user: None,
+        };
+
+        assert!(request.validate().is_ok());
+        assert_eq!(request.effective_top_k(), 100);
+    }
+
+    #[test]
+    fn test_rerank_request_special_characters() {
+        let request = RerankRequest {
+            query: "query with émojis 🚀 and unicode: 测试".to_string(),
+            documents: vec![
+                "doc with émojis 🎉".to_string(),
+                "doc with unicode: 测试".to_string(),
+            ],
+            model: "test-model".to_string(),
+            top_k: None,
+            return_documents: true,
+            rid: Some(StringOrArray::String("req-🚀-123".to_string())),
+            user: Some("user-🎉-456".to_string()),
+        };
+
+        assert!(request.validate().is_ok());
+    }
+
+    #[test]
+    fn test_rerank_request_rid_array() {
+        let request = RerankRequest {
+            query: "test query".to_string(),
+            documents: vec!["doc1".to_string()],
+            model: "test-model".to_string(),
+            top_k: None,
+            return_documents: true,
+            rid: Some(StringOrArray::Array(vec![
+                "req1".to_string(),
+                "req2".to_string(),
+            ])),
+            user: None,
+        };
+
+        assert!(request.validate().is_ok());
+    }
+
+    #[test]
+    fn test_rerank_response_with_usage_info() {
+        let results = vec![RerankResult {
+            score: 0.8,
+            document: Some("doc1".to_string()),
+            index: 0,
+            meta_info: None,
+        }];
+
+        let mut response = RerankResponse::new(
+            results,
+            "test-model".to_string(),
+            Some(StringOrArray::String("req-123".to_string())),
+        );
+
+        response.usage = Some(UsageInfo {
+            prompt_tokens: 100,
+            completion_tokens: 50,
+            total_tokens: 150,
+            reasoning_tokens: None,
+            prompt_tokens_details: None,
+        });
+
+        let serialized = serde_json::to_string(&response).unwrap();
+        let deserialized: RerankResponse = serde_json::from_str(&serialized).unwrap();
+
+        assert!(deserialized.usage.is_some());
+        let usage = deserialized.usage.unwrap();
+        assert_eq!(usage.prompt_tokens, 100);
+        assert_eq!(usage.completion_tokens, 50);
+        assert_eq!(usage.total_tokens, 150);
+    }
+
+    // ==================================================================
+    // =            INTEGRATION TESTS                                   =
+    // ==================================================================
+
+    #[test]
+    fn test_full_rerank_workflow() {
+        // Create request
+        let request = RerankRequest {
+            query: "machine learning".to_string(),
+            documents: vec![
+                "Introduction to machine learning algorithms".to_string(),
+                "Deep learning for computer vision".to_string(),
+                "Natural language processing basics".to_string(),
+                "Statistics and probability theory".to_string(),
+            ],
+            model: "rerank-model".to_string(),
+            top_k: Some(2),
+            return_documents: true,
+            rid: Some(StringOrArray::String("req-123".to_string())),
+            user: Some("user-456".to_string()),
+        };
+
+        // Validate request
+        assert!(request.validate().is_ok());
+
+        // Simulate reranking results (in real scenario, this would come from the model)
+        let results = vec![
+            RerankResult {
+                score: 0.95,
+                document: Some("Introduction to machine learning algorithms".to_string()),
+                index: 0,
+                meta_info: None,
+            },
+            RerankResult {
+                score: 0.87,
+                document: Some("Deep learning for computer vision".to_string()),
+                index: 1,
+                meta_info: None,
+            },
+            RerankResult {
+                score: 0.72,
+                document: Some("Natural language processing basics".to_string()),
+                index: 2,
+                meta_info: None,
+            },
+            RerankResult {
+                score: 0.45,
+                document: Some("Statistics and probability theory".to_string()),
+                index: 3,
+                meta_info: None,
+            },
+        ];
+
+        // Create response
+        let mut response = RerankResponse::new(results, request.model.clone(), request.rid.clone());
+
+        // Sort by score
+        response.sort_by_score();
+
+        // Apply top_k
+        response.apply_top_k(request.effective_top_k());
+
+        // Verify results
+        assert_eq!(response.results.len(), 2);
+        assert_eq!(response.results[0].score, 0.95);
+        assert_eq!(response.results[0].index, 0);
+        assert_eq!(response.results[1].score, 0.87);
+        assert_eq!(response.results[1].index, 1);
+        assert_eq!(response.model, "rerank-model");
+
+        // Serialize and deserialize
+        let serialized = serde_json::to_string(&response).unwrap();
+        let deserialized: RerankResponse = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized.results.len(), 2);
+        assert_eq!(deserialized.model, response.model);
+    }
+
+    // ==================================================================
+    // =            EMBEDDINGS REQUEST TESTS                             =
+    // ==================================================================
+
+    #[test]
+    fn test_embedding_request_serialization_string_input() {
+        let req = EmbeddingRequest {
+            model: "test-emb".to_string(),
+            input: serde_json::Value::String("hello".to_string()),
+            encoding_format: Some("float".to_string()),
+            user: Some("user-1".to_string()),
+            dimensions: Some(128),
+            rid: Some("rid-123".to_string()),
+        };
+
+        let serialized = serde_json::to_string(&req).unwrap();
+        let deserialized: EmbeddingRequest = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(deserialized.model, req.model);
+        assert_eq!(deserialized.input, req.input);
+        assert_eq!(deserialized.encoding_format, req.encoding_format);
+        assert_eq!(deserialized.user, req.user);
+        assert_eq!(deserialized.dimensions, req.dimensions);
+        assert_eq!(deserialized.rid, req.rid);
+    }
+
+    #[test]
+    fn test_embedding_request_serialization_array_input() {
+        let req = EmbeddingRequest {
+            model: "test-emb".to_string(),
+            input: serde_json::json!(["a", "b", "c"]),
+            encoding_format: None,
+            user: None,
+            dimensions: None,
+            rid: None,
+        };
+
+        let serialized = serde_json::to_string(&req).unwrap();
+        let de: EmbeddingRequest = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(de.model, req.model);
+        assert_eq!(de.input, req.input);
+    }
+
+    #[test]
+    fn test_embedding_generation_request_trait_string() {
+        let req = EmbeddingRequest {
+            model: "emb-model".to_string(),
+            input: serde_json::Value::String("hello".to_string()),
+            encoding_format: None,
+            user: None,
+            dimensions: None,
+            rid: None,
+        };
+        assert!(!req.is_stream());
+        assert_eq!(req.get_model(), Some("emb-model"));
+        assert_eq!(req.extract_text_for_routing(), "hello");
+    }
+
+    #[test]
+    fn test_embedding_generation_request_trait_array() {
+        let req = EmbeddingRequest {
+            model: "emb-model".to_string(),
+            input: serde_json::json!(["hello", "world"]),
+            encoding_format: None,
+            user: None,
+            dimensions: None,
+            rid: None,
+        };
+        assert_eq!(req.extract_text_for_routing(), "hello world");
+    }
+
+    #[test]
+    fn test_embedding_generation_request_trait_non_text() {
+        let req = EmbeddingRequest {
+            model: "emb-model".to_string(),
+            input: serde_json::json!({"tokens": [1, 2, 3]}),
+            encoding_format: None,
+            user: None,
+            dimensions: None,
+            rid: None,
+        };
+        assert_eq!(req.extract_text_for_routing(), "");
+    }
+
+    #[test]
+    fn test_embedding_generation_request_trait_mixed_array_ignores_nested() {
+        let req = EmbeddingRequest {
+            model: "emb-model".to_string(),
+            input: serde_json::json!(["a", ["b", "c"], 123, {"k": "v"}]),
+            encoding_format: None,
+            user: None,
+            dimensions: None,
+            rid: None,
+        };
+        // Only top-level string elements are extracted
+        assert_eq!(req.extract_text_for_routing(), "a");
+    }
 }

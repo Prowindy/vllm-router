@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-vLLM Router Benchmark Runner
+VLLM Router Benchmark Runner
 
 A Python script to run Rust benchmarks with various options and modes.
 Replaces the shell script for better maintainability and integration.
@@ -16,7 +16,7 @@ from typing import Dict, List, Optional
 
 
 class BenchmarkRunner:
-    """Handles running Rust benchmarks for the vLLM router."""
+    """Handles running Rust benchmarks for the VLLM router."""
 
     def __init__(self, project_root: str):
         self.project_root = Path(project_root)
@@ -41,7 +41,7 @@ class BenchmarkRunner:
 
     def print_header(self):
         """Print the benchmark runner header."""
-        print("vLLM Router Benchmark Runner")
+        print("VLLM Router Benchmark Runner")
         print("=" * 30)
         print(f"Project: {self.project_root.absolute()}")
         print(f"Timestamp: {self.timestamp}")
@@ -189,7 +189,7 @@ class BenchmarkRunner:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run vLLM router benchmarks")
+    parser = argparse.ArgumentParser(description="Run VLLM router benchmarks")
     parser.add_argument(
         "--quick", action="store_true", help="Run quick benchmarks (summary only)"
     )

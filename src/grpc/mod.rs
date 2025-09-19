@@ -1,6 +1,6 @@
-//! gRPC client module for communicating with vLLM scheduler
+//! gRPC client module for communicating with SGLang scheduler
 //!
-//! This module provides a gRPC client implementation for the vLLM router.
+//! This module provides a gRPC client implementation for the SGLang router.
 
 pub mod client;
 

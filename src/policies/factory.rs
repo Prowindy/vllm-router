@@ -101,6 +101,8 @@ mod tests {
         assert!(PolicyFactory::create_by_name("PowerOfTwo").is_some());
         assert!(PolicyFactory::create_by_name("cache_aware").is_some());
         assert!(PolicyFactory::create_by_name("CacheAware").is_some());
+        assert!(PolicyFactory::create_by_name("consistent_hash").is_some());
+        assert!(PolicyFactory::create_by_name("ConsistentHash").is_some());
         assert!(PolicyFactory::create_by_name("unknown").is_none());
     }
 }

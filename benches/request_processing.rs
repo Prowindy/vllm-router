@@ -40,7 +40,7 @@ fn default_generate_request() -> GenerateRequest {
         parameters: None,
         sampling_params: None,
         return_logprob: false,
-        // vLLM Extensions
+        // VLLM Extensions
         lora_path: None,
         session_params: None,
         return_hidden_states: false,
@@ -74,7 +74,7 @@ fn default_chat_completion_request() -> ChatCompletionRequest {
         parallel_tool_calls: None,
         function_call: None,
         functions: None,
-        // vLLM Extensions
+        // VLLM Extensions
         top_k: None,
         min_p: None,
         min_tokens: None,
@@ -86,11 +86,12 @@ fn default_chat_completion_request() -> ChatCompletionRequest {
         ignore_eos: false,
         continue_final_message: false,
         skip_special_tokens: true,
-        // vLLM Extensions
+        // VLLM Extensions
         lora_path: None,
         session_params: None,
         separate_reasoning: true,
         stream_reasoning: true,
+        chat_template_kwargs: None,
         return_hidden_states: false,
     }
 }
@@ -116,7 +117,7 @@ fn default_completion_request() -> CompletionRequest {
         logit_bias: None,
         user: None,
         seed: None,
-        // vLLM Extensions
+        // VLLM Extensions
         top_k: None,
         min_p: None,
         min_tokens: None,
@@ -128,7 +129,7 @@ fn default_completion_request() -> CompletionRequest {
         no_stop_trim: false,
         ignore_eos: false,
         skip_special_tokens: true,
-        // vLLM Extensions
+        // VLLM Extensions
         lora_path: None,
         session_params: None,
         return_hidden_states: false,
@@ -598,7 +599,7 @@ fn bench_full_round_trip(c: &mut Criterion) {
 fn benchmark_summary(c: &mut Criterion) {
     let group = c.benchmark_group("benchmark_summary");
 
-    println!("\nvLLM Router Performance Benchmark Suite");
+    println!("\nVLLM Router Performance Benchmark Suite");
     println!("=============================================");
 
     // Quick performance overview

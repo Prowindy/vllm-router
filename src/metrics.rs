@@ -21,219 +21,231 @@ impl Default for PrometheusConfig {
 pub fn init_metrics() {
     // Request metrics
     describe_counter!(
-        "vllm_router_requests_total",
+        "sgl_router_requests_total",
         "Total number of requests by route and method"
     );
     describe_histogram!(
-        "vllm_router_request_duration_seconds",
+        "sgl_router_request_duration_seconds",
         "Request duration in seconds by route"
     );
     describe_counter!(
-        "vllm_router_request_errors_total",
+        "sgl_router_request_errors_total",
         "Total number of request errors by route and error type"
     );
     describe_counter!(
-        "vllm_router_retries_total",
+        "sgl_router_retries_total",
         "Total number of request retries by route"
     );
     describe_histogram!(
-        "vllm_router_retry_backoff_duration_seconds",
+        "sgl_router_retry_backoff_duration_seconds",
         "Backoff duration in seconds by attempt index"
     );
     describe_counter!(
-        "vllm_router_retries_exhausted_total",
+        "sgl_router_retries_exhausted_total",
         "Total number of requests that exhausted retries by route"
     );
 
     // Circuit breaker metrics
     describe_gauge!(
-        "vllm_router_cb_state",
+        "sgl_router_cb_state",
         "Circuit breaker state per worker (0=closed, 1=open, 2=half_open)"
     );
     describe_counter!(
-        "vllm_router_cb_state_transitions_total",
+        "sgl_router_cb_state_transitions_total",
         "Total number of circuit breaker state transitions by worker"
     );
     describe_counter!(
-        "vllm_router_cb_outcomes_total",
+        "sgl_router_cb_outcomes_total",
         "Total number of circuit breaker outcomes by worker and outcome type (success/failure)"
     );
 
     // Worker metrics
     describe_gauge!(
-        "vllm_router_active_workers",
+        "sgl_router_active_workers",
         "Number of currently active workers"
     );
     describe_gauge!(
-        "vllm_router_worker_health",
+        "sgl_router_worker_health",
         "Worker health status (1=healthy, 0=unhealthy)"
     );
-    describe_gauge!("vllm_router_worker_load", "Current load on each worker");
+    describe_gauge!("sgl_router_worker_load", "Current load on each worker");
     describe_counter!(
-        "vllm_router_processed_requests_total",
+        "sgl_router_processed_requests_total",
         "Total requests processed by each worker"
     );
 
     // Policy metrics
     describe_counter!(
-        "vllm_router_policy_decisions_total",
+        "sgl_router_policy_decisions_total",
         "Total routing policy decisions by policy and worker"
     );
-    describe_counter!("vllm_router_cache_hits_total", "Total cache hits");
-    describe_counter!("vllm_router_cache_misses_total", "Total cache misses");
+    describe_counter!("sgl_router_cache_hits_total", "Total cache hits");
+    describe_counter!("sgl_router_cache_misses_total", "Total cache misses");
     describe_gauge!(
-        "vllm_router_tree_size",
+        "sgl_router_tree_size",
         "Current tree size for cache-aware routing"
     );
     describe_counter!(
-        "vllm_router_load_balancing_events_total",
+        "sgl_router_load_balancing_events_total",
         "Total load balancing trigger events"
     );
-    describe_gauge!("vllm_router_max_load", "Maximum worker load");
-    describe_gauge!("vllm_router_min_load", "Minimum worker load");
+    describe_gauge!("sgl_router_max_load", "Maximum worker load");
+    describe_gauge!("sgl_router_min_load", "Minimum worker load");
 
     // PD-specific metrics
-    describe_counter!("vllm_router_pd_requests_total", "Total PD requests by route");
+    describe_counter!("sgl_router_pd_requests_total", "Total PD requests by route");
     describe_counter!(
-        "vllm_router_pd_prefill_requests_total",
+        "sgl_router_pd_prefill_requests_total",
         "Total prefill requests per worker"
     );
     describe_counter!(
-        "vllm_router_pd_decode_requests_total",
+        "sgl_router_pd_decode_requests_total",
         "Total decode requests per worker"
     );
     describe_counter!(
-        "vllm_router_pd_errors_total",
+        "sgl_router_pd_errors_total",
         "Total PD errors by error type"
     );
     describe_counter!(
-        "vllm_router_pd_prefill_errors_total",
+        "sgl_router_pd_prefill_errors_total",
         "Total prefill server errors"
     );
     describe_counter!(
-        "vllm_router_pd_decode_errors_total",
+        "sgl_router_pd_decode_errors_total",
         "Total decode server errors"
     );
     describe_counter!(
-        "vllm_router_pd_stream_errors_total",
+        "sgl_router_pd_stream_errors_total",
         "Total streaming errors per worker"
     );
     describe_histogram!(
-        "vllm_router_pd_request_duration_seconds",
+        "sgl_router_pd_request_duration_seconds",
         "PD request duration by route"
     );
 
     // Service discovery metrics
     describe_counter!(
-        "vllm_router_discovery_updates_total",
+        "sgl_router_discovery_updates_total",
         "Total service discovery update events"
     );
     describe_gauge!(
-        "vllm_router_discovery_workers_added",
+        "sgl_router_discovery_workers_added",
         "Number of workers added in last discovery update"
     );
     describe_gauge!(
-        "vllm_router_discovery_workers_removed",
+        "sgl_router_discovery_workers_removed",
         "Number of workers removed in last discovery update"
     );
 
     // Generate request specific metrics
     describe_histogram!(
-        "vllm_router_generate_duration_seconds",
+        "sgl_router_generate_duration_seconds",
         "Generate request duration"
     );
 
+    // Embedding request specific metrics
+    describe_counter!("sgl_router_embeddings_total", "Total embedding requests");
+    describe_histogram!(
+        "sgl_router_embeddings_duration_seconds",
+        "Embedding request duration"
+    );
+    describe_counter!(
+        "sgl_router_embeddings_errors_total",
+        "Embedding request errors"
+    );
+    describe_gauge!("sgl_router_embeddings_queue_size", "Embedding queue size");
+
     // Running requests gauge for cache-aware policy
     describe_gauge!(
-        "vllm_router_running_requests",
+        "sgl_router_running_requests",
         "Number of running requests per worker"
     );
 
     // Tokenizer metrics
     describe_histogram!(
-        "vllm_tokenizer_encode_duration_seconds",
+        "sgl_tokenizer_encode_duration_seconds",
         "Time to encode text to tokens"
     );
     describe_histogram!(
-        "vllm_tokenizer_decode_duration_seconds",
+        "sgl_tokenizer_decode_duration_seconds",
         "Time to decode tokens to text"
     );
     describe_histogram!(
-        "vllm_tokenizer_encode_batch_duration_seconds",
+        "sgl_tokenizer_encode_batch_duration_seconds",
         "Time to encode a batch of texts"
     );
     describe_counter!(
-        "vllm_tokenizer_encode_requests_total",
+        "sgl_tokenizer_encode_requests_total",
         "Total number of encode requests by tokenizer type"
     );
     describe_counter!(
-        "vllm_tokenizer_decode_requests_total",
+        "sgl_tokenizer_decode_requests_total",
         "Total number of decode requests by tokenizer type"
     );
     describe_counter!(
-        "vllm_tokenizer_encode_errors_total",
+        "sgl_tokenizer_encode_errors_total",
         "Total number of encode errors by error type"
     );
     describe_counter!(
-        "vllm_tokenizer_decode_errors_total",
+        "sgl_tokenizer_decode_errors_total",
         "Total number of decode errors by error type"
     );
     describe_histogram!(
-        "vllm_tokenizer_tokens_per_encode",
+        "sgl_tokenizer_tokens_per_encode",
         "Number of tokens produced per encode operation"
     );
     describe_histogram!(
-        "vllm_tokenizer_chars_per_encode",
+        "sgl_tokenizer_chars_per_encode",
         "Number of characters in input text per encode"
     );
     describe_histogram!(
-        "vllm_tokenizer_tokens_per_decode",
+        "sgl_tokenizer_tokens_per_decode",
         "Number of tokens decoded per operation"
     );
     describe_gauge!(
-        "vllm_tokenizer_vocab_size",
+        "sgl_tokenizer_vocab_size",
         "Vocabulary size of the loaded tokenizer"
     );
 
     // Stop sequence detection metrics
     describe_counter!(
-        "vllm_tokenizer_stop_sequences_detected_total",
+        "sgl_tokenizer_stop_sequences_detected_total",
         "Total stop sequences detected by type"
     );
     describe_counter!(
-        "vllm_tokenizer_partial_matches_total",
+        "sgl_tokenizer_partial_matches_total",
         "Total partial stop sequence matches (jailed text)"
     );
     describe_histogram!(
-        "vllm_tokenizer_stop_detection_duration_seconds",
+        "sgl_tokenizer_stop_detection_duration_seconds",
         "Time to check for stop sequences per token"
     );
 
     // Streaming decode metrics
     describe_counter!(
-        "vllm_tokenizer_stream_tokens_total",
+        "sgl_tokenizer_stream_tokens_total",
         "Total tokens processed in streaming decode"
     );
     describe_counter!(
-        "vllm_tokenizer_stream_incomplete_utf8_total",
+        "sgl_tokenizer_stream_incomplete_utf8_total",
         "Total incomplete UTF-8 sequences detected"
     );
     describe_histogram!(
-        "vllm_tokenizer_stream_step_duration_seconds",
+        "sgl_tokenizer_stream_step_duration_seconds",
         "Time per streaming decode step"
     );
 
     // Factory metrics
     describe_counter!(
-        "vllm_tokenizer_factory_loads_total",
+        "sgl_tokenizer_factory_loads_total",
         "Total tokenizer loads by file type"
     );
     describe_counter!(
-        "vllm_tokenizer_factory_errors_total",
+        "sgl_tokenizer_factory_errors_total",
         "Total tokenizer loading errors by type"
     );
     describe_histogram!(
-        "vllm_tokenizer_factory_load_duration_seconds",
+        "sgl_tokenizer_factory_load_duration_seconds",
         "Time to load and initialize tokenizer"
     );
 }
@@ -270,21 +282,21 @@ pub struct TokenizerMetrics;
 impl RouterMetrics {
     // Request metrics
     pub fn record_request(route: &str) {
-        counter!("vllm_router_requests_total",
+        counter!("sgl_router_requests_total",
             "route" => route.to_string()
         )
         .increment(1);
     }
 
     pub fn record_request_duration(route: &str, duration: Duration) {
-        histogram!("vllm_router_request_duration_seconds",
+        histogram!("sgl_router_request_duration_seconds",
             "route" => route.to_string()
         )
         .record(duration.as_secs_f64());
     }
 
     pub fn record_request_error(route: &str, error_type: &str) {
-        counter!("vllm_router_request_errors_total",
+        counter!("sgl_router_request_errors_total",
             "route" => route.to_string(),
             "error_type" => error_type.to_string()
         )
@@ -292,21 +304,21 @@ impl RouterMetrics {
     }
 
     pub fn record_retry(route: &str) {
-        counter!("vllm_router_retries_total",
+        counter!("sgl_router_retries_total",
             "route" => route.to_string()
         )
         .increment(1);
     }
 
     pub fn record_retry_backoff_duration(duration: Duration, attempt: u32) {
-        histogram!("vllm_router_retry_backoff_duration_seconds",
+        histogram!("sgl_router_retry_backoff_duration_seconds",
             "attempt" => attempt.to_string()
         )
         .record(duration.as_secs_f64());
     }
 
     pub fn record_retries_exhausted(route: &str) {
-        counter!("vllm_router_retries_exhausted_total",
+        counter!("sgl_router_retries_exhausted_total",
             "route" => route.to_string()
         )
         .increment(1);
@@ -314,25 +326,25 @@ impl RouterMetrics {
 
     // Worker metrics
     pub fn set_active_workers(count: usize) {
-        gauge!("vllm_router_active_workers").set(count as f64);
+        gauge!("sgl_router_active_workers").set(count as f64);
     }
 
     pub fn set_worker_health(worker_url: &str, healthy: bool) {
-        gauge!("vllm_router_worker_health",
+        gauge!("sgl_router_worker_health",
             "worker" => worker_url.to_string()
         )
         .set(if healthy { 1.0 } else { 0.0 });
     }
 
     pub fn set_worker_load(worker_url: &str, load: usize) {
-        gauge!("vllm_router_worker_load",
+        gauge!("sgl_router_worker_load",
             "worker" => worker_url.to_string()
         )
         .set(load as f64);
     }
 
     pub fn record_processed_request(worker_url: &str) {
-        counter!("vllm_router_processed_requests_total",
+        counter!("sgl_router_processed_requests_total",
             "worker" => worker_url.to_string()
         )
         .increment(1);
@@ -340,7 +352,7 @@ impl RouterMetrics {
 
     // Policy metrics
     pub fn record_policy_decision(policy: &str, worker: &str) {
-        counter!("vllm_router_policy_decisions_total",
+        counter!("sgl_router_policy_decisions_total",
             "policy" => policy.to_string(),
             "worker" => worker.to_string()
         )
@@ -348,81 +360,81 @@ impl RouterMetrics {
     }
 
     pub fn record_cache_hit() {
-        counter!("vllm_router_cache_hits_total").increment(1);
+        counter!("sgl_router_cache_hits_total").increment(1);
     }
 
     pub fn record_cache_miss() {
-        counter!("vllm_router_cache_misses_total").increment(1);
+        counter!("sgl_router_cache_misses_total").increment(1);
     }
 
     pub fn set_tree_size(worker: &str, size: usize) {
-        gauge!("vllm_router_tree_size",
+        gauge!("sgl_router_tree_size",
             "worker" => worker.to_string()
         )
         .set(size as f64);
     }
 
     pub fn record_load_balancing_event() {
-        counter!("vllm_router_load_balancing_events_total").increment(1);
+        counter!("sgl_router_load_balancing_events_total").increment(1);
     }
 
     pub fn set_load_range(max_load: usize, min_load: usize) {
-        gauge!("vllm_router_max_load").set(max_load as f64);
-        gauge!("vllm_router_min_load").set(min_load as f64);
+        gauge!("sgl_router_max_load").set(max_load as f64);
+        gauge!("sgl_router_min_load").set(min_load as f64);
     }
 
     // PD-specific metrics
     pub fn record_pd_request(route: &str) {
-        counter!("vllm_router_pd_requests_total",
+        counter!("sgl_router_pd_requests_total",
             "route" => route.to_string()
         )
         .increment(1);
     }
 
     pub fn record_pd_request_duration(route: &str, duration: Duration) {
-        histogram!("vllm_router_pd_request_duration_seconds",
+        histogram!("sgl_router_pd_request_duration_seconds",
             "route" => route.to_string()
         )
         .record(duration.as_secs_f64());
     }
 
     pub fn record_pd_prefill_request(worker: &str) {
-        counter!("vllm_router_pd_prefill_requests_total",
+        counter!("sgl_router_pd_prefill_requests_total",
             "worker" => worker.to_string()
         )
         .increment(1);
     }
 
     pub fn record_pd_decode_request(worker: &str) {
-        counter!("vllm_router_pd_decode_requests_total",
+        counter!("sgl_router_pd_decode_requests_total",
             "worker" => worker.to_string()
         )
         .increment(1);
     }
 
     pub fn record_pd_error(error_type: &str) {
-        counter!("vllm_router_pd_errors_total",
+        counter!("sgl_router_pd_errors_total",
             "error_type" => error_type.to_string()
         )
         .increment(1);
     }
 
     pub fn record_pd_prefill_error(worker: &str) {
-        counter!("vllm_router_pd_prefill_errors_total",
+        counter!("sgl_router_pd_prefill_errors_total",
             "worker" => worker.to_string()
         )
         .increment(1);
     }
 
     pub fn record_pd_decode_error(worker: &str) {
-        counter!("vllm_router_pd_decode_errors_total",
+        counter!("sgl_router_pd_decode_errors_total",
             "worker" => worker.to_string()
         )
         .increment(1);
     }
 
     pub fn record_pd_stream_error(worker: &str) {
-        counter!("vllm_router_pd_stream_errors_total",
+        counter!("sgl_router_pd_stream_errors_total",
             "worker" => worker.to_string()
         )
         .increment(1);
@@ -430,19 +442,40 @@ impl RouterMetrics {
 
     // Service discovery metrics
     pub fn record_discovery_update(added: usize, removed: usize) {
-        counter!("vllm_router_discovery_updates_total").increment(1);
-        gauge!("vllm_router_discovery_workers_added").set(added as f64);
-        gauge!("vllm_router_discovery_workers_removed").set(removed as f64);
+        counter!("sgl_router_discovery_updates_total").increment(1);
+        gauge!("sgl_router_discovery_workers_added").set(added as f64);
+        gauge!("sgl_router_discovery_workers_removed").set(removed as f64);
     }
 
     // Generate request metrics
     pub fn record_generate_duration(duration: Duration) {
-        histogram!("vllm_router_generate_duration_seconds").record(duration.as_secs_f64());
+        histogram!("sgl_router_generate_duration_seconds").record(duration.as_secs_f64());
+    }
+
+    // Embeddings metrics
+    pub fn record_embeddings_request() {
+        counter!("sgl_router_embeddings_total").increment(1);
+    }
+
+    pub fn record_embeddings_duration(duration: Duration) {
+        histogram!("sgl_router_embeddings_duration_seconds").record(duration.as_secs_f64());
+    }
+
+    pub fn record_embeddings_error(error_type: &str) {
+        counter!(
+            "sgl_router_embeddings_errors_total",
+            "error_type" => error_type.to_string()
+        )
+        .increment(1);
+    }
+
+    pub fn set_embeddings_queue_size(size: usize) {
+        gauge!("sgl_router_embeddings_queue_size").set(size as f64);
     }
 
     // Running requests for cache-aware policy
     pub fn set_running_requests(worker: &str, count: usize) {
-        gauge!("vllm_router_running_requests",
+        gauge!("sgl_router_running_requests",
             "worker" => worker.to_string()
         )
         .set(count as f64);
@@ -450,14 +483,14 @@ impl RouterMetrics {
 
     // Circuit breaker metrics
     pub fn set_cb_state(worker: &str, state_code: u8) {
-        gauge!("vllm_router_cb_state",
+        gauge!("sgl_router_cb_state",
             "worker" => worker.to_string()
         )
         .set(state_code as f64);
     }
 
     pub fn record_cb_state_transition(worker: &str, from: &str, to: &str) {
-        counter!("vllm_router_cb_state_transitions_total",
+        counter!("sgl_router_cb_state_transitions_total",
             "worker" => worker.to_string(),
             "from" => from.to_string(),
             "to" => to.to_string()
@@ -466,7 +499,7 @@ impl RouterMetrics {
     }
 
     pub fn record_cb_outcome(worker: &str, outcome: &str) {
-        counter!("vllm_router_cb_outcomes_total",
+        counter!("sgl_router_cb_outcomes_total",
             "worker" => worker.to_string(),
             "outcome" => outcome.to_string()
         )
@@ -477,57 +510,57 @@ impl RouterMetrics {
 impl TokenizerMetrics {
     // Encoding metrics
     pub fn record_encode_request(tokenizer_type: &str) {
-        counter!("vllm_tokenizer_encode_requests_total",
+        counter!("sgl_tokenizer_encode_requests_total",
             "tokenizer_type" => tokenizer_type.to_string()
         )
         .increment(1);
     }
 
     pub fn record_encode_duration(duration: Duration) {
-        histogram!("vllm_tokenizer_encode_duration_seconds").record(duration.as_secs_f64());
+        histogram!("sgl_tokenizer_encode_duration_seconds").record(duration.as_secs_f64());
     }
 
     pub fn record_encode_error(error_type: &str) {
-        counter!("vllm_tokenizer_encode_errors_total",
+        counter!("sgl_tokenizer_encode_errors_total",
             "error_type" => error_type.to_string()
         )
         .increment(1);
     }
 
     pub fn record_tokens_per_encode(token_count: usize) {
-        histogram!("vllm_tokenizer_tokens_per_encode").record(token_count as f64);
+        histogram!("sgl_tokenizer_tokens_per_encode").record(token_count as f64);
     }
 
     pub fn record_chars_per_encode(char_count: usize) {
-        histogram!("vllm_tokenizer_chars_per_encode").record(char_count as f64);
+        histogram!("sgl_tokenizer_chars_per_encode").record(char_count as f64);
     }
 
     // Decoding metrics
     pub fn record_decode_request(tokenizer_type: &str) {
-        counter!("vllm_tokenizer_decode_requests_total",
+        counter!("sgl_tokenizer_decode_requests_total",
             "tokenizer_type" => tokenizer_type.to_string()
         )
         .increment(1);
     }
 
     pub fn record_decode_duration(duration: Duration) {
-        histogram!("vllm_tokenizer_decode_duration_seconds").record(duration.as_secs_f64());
+        histogram!("sgl_tokenizer_decode_duration_seconds").record(duration.as_secs_f64());
     }
 
     pub fn record_decode_error(error_type: &str) {
-        counter!("vllm_tokenizer_decode_errors_total",
+        counter!("sgl_tokenizer_decode_errors_total",
             "error_type" => error_type.to_string()
         )
         .increment(1);
     }
 
     pub fn record_tokens_per_decode(token_count: usize) {
-        histogram!("vllm_tokenizer_tokens_per_decode").record(token_count as f64);
+        histogram!("sgl_tokenizer_tokens_per_decode").record(token_count as f64);
     }
 
     // Batch encoding metrics
     pub fn record_encode_batch_duration(duration: Duration, batch_size: usize) {
-        histogram!("vllm_tokenizer_encode_batch_duration_seconds",
+        histogram!("sgl_tokenizer_encode_batch_duration_seconds",
             "batch_size" => batch_size.to_string()
         )
         .record(duration.as_secs_f64());
@@ -535,55 +568,55 @@ impl TokenizerMetrics {
 
     // Stop sequence detection metrics
     pub fn record_stop_sequence_detected(stop_type: &str) {
-        counter!("vllm_tokenizer_stop_sequences_detected_total",
+        counter!("sgl_tokenizer_stop_sequences_detected_total",
             "type" => stop_type.to_string()
         )
         .increment(1);
     }
 
     pub fn record_partial_match() {
-        counter!("vllm_tokenizer_partial_matches_total").increment(1);
+        counter!("sgl_tokenizer_partial_matches_total").increment(1);
     }
 
     pub fn record_stop_detection_duration(duration: Duration) {
-        histogram!("vllm_tokenizer_stop_detection_duration_seconds").record(duration.as_secs_f64());
+        histogram!("sgl_tokenizer_stop_detection_duration_seconds").record(duration.as_secs_f64());
     }
 
     // Streaming decode metrics
     pub fn record_stream_token() {
-        counter!("vllm_tokenizer_stream_tokens_total").increment(1);
+        counter!("sgl_tokenizer_stream_tokens_total").increment(1);
     }
 
     pub fn record_incomplete_utf8() {
-        counter!("vllm_tokenizer_stream_incomplete_utf8_total").increment(1);
+        counter!("sgl_tokenizer_stream_incomplete_utf8_total").increment(1);
     }
 
     pub fn record_stream_step_duration(duration: Duration) {
-        histogram!("vllm_tokenizer_stream_step_duration_seconds").record(duration.as_secs_f64());
+        histogram!("sgl_tokenizer_stream_step_duration_seconds").record(duration.as_secs_f64());
     }
 
     // Factory metrics
     pub fn record_factory_load(file_type: &str) {
-        counter!("vllm_tokenizer_factory_loads_total",
+        counter!("sgl_tokenizer_factory_loads_total",
             "file_type" => file_type.to_string()
         )
         .increment(1);
     }
 
     pub fn record_factory_error(error_type: &str) {
-        counter!("vllm_tokenizer_factory_errors_total",
+        counter!("sgl_tokenizer_factory_errors_total",
             "error_type" => error_type.to_string()
         )
         .increment(1);
     }
 
     pub fn record_factory_load_duration(duration: Duration) {
-        histogram!("vllm_tokenizer_factory_load_duration_seconds").record(duration.as_secs_f64());
+        histogram!("sgl_tokenizer_factory_load_duration_seconds").record(duration.as_secs_f64());
     }
 
     // Vocabulary metrics
     pub fn set_vocab_size(tokenizer_type: &str, size: usize) {
-        gauge!("vllm_tokenizer_vocab_size",
+        gauge!("sgl_tokenizer_vocab_size",
             "tokenizer_type" => tokenizer_type.to_string()
         )
         .set(size as f64);
@@ -751,7 +784,7 @@ mod tests {
         let _matching_metrics = [
             "request_duration_seconds",
             "response_duration_seconds",
-            "vllm_router_request_duration_seconds",
+            "sgl_router_request_duration_seconds",
         ];
 
         let _non_matching_metrics = ["duration_total", "duration_seconds_total", "other_metric"];

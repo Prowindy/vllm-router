@@ -4,7 +4,7 @@
 
 ### High-Level Overview
 
-The vLLM Router tokenizer layer provides a unified interface for text tokenization and detokenization, supporting multiple tokenizer backends (HuggingFace, Tiktoken, Mock) with sophisticated streaming capabilities and stop sequence detection. The architecture follows a trait-based design pattern enabling pluggable tokenizer implementations while maintaining consistent APIs across the router.
+The SGL Router tokenizer layer provides a unified interface for text tokenization and detokenization, supporting multiple tokenizer backends (HuggingFace, Tiktoken, Mock) with sophisticated streaming capabilities and stop sequence detection. The architecture follows a trait-based design pattern enabling pluggable tokenizer implementations while maintaining consistent APIs across the router.
 
 **Key Components:**
 - **Factory Pattern**: Auto-detection and creation of appropriate tokenizer types from files or model names
@@ -946,13 +946,13 @@ The `Encoding` enum must:
 ### Metrics
 
 **Metric Names (via TokenizerMetrics):**
-- `vllm_tokenizer_encode_duration_seconds`
-- `vllm_tokenizer_decode_duration_seconds`
-- `vllm_tokenizer_tokens_per_encode`
-- `vllm_tokenizer_chars_per_encode`
-- `vllm_tokenizer_factory_load_duration_seconds`
-- `vllm_tokenizer_stop_sequence_detected`
-- `vllm_tokenizer_stream_incomplete_utf8_total`
+- `sgl_tokenizer_encode_duration_seconds`
+- `sgl_tokenizer_decode_duration_seconds`
+- `sgl_tokenizer_tokens_per_encode`
+- `sgl_tokenizer_chars_per_encode`
+- `sgl_tokenizer_factory_load_duration_seconds`
+- `sgl_tokenizer_stop_sequence_detected`
+- `sgl_tokenizer_stream_incomplete_utf8_total`
 
 **Labels:**
 - `tokenizer_type`: huggingface, tiktoken, mock

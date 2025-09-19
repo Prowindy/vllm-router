@@ -67,6 +67,23 @@ pub struct RouterConfig {
     pub model_path: Option<String>,
     /// Explicit tokenizer path (overrides model_path tokenizer if provided)
     pub tokenizer_path: Option<String>,
+    /// History backend configuration (memory or none, default: memory)
+    #[serde(default = "default_history_backend")]
+    pub history_backend: HistoryBackend,
+}
+
+fn default_history_backend() -> HistoryBackend {
+    HistoryBackend::Memory
+}
+
+/// History backend configuration
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum HistoryBackend {
+    /// In-memory storage (default)
+    Memory,
+    /// No history storage
+    None,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -101,11 +118,36 @@ pub enum RoutingMode {
         #[serde(skip_serializing_if = "Option::is_none")]
         decode_policy: Option<PolicyConfig>,
     },
+    #[serde(rename = "openai")]
+    OpenAI {
+        /// OpenAI-compatible API base(s), provided via worker URLs
+        worker_urls: Vec<String>,
+    },
+    #[serde(rename = "vllm_prefill_decode")]
+    VllmPrefillDecode {
+        /// Prefill worker URLs with optional bootstrap ports
+        prefill_urls: Vec<(String, Option<u16>)>,
+        /// Decode worker URLs
+        decode_urls: Vec<String>,
+        /// Optional separate policy for prefill workers
+        #[serde(skip_serializing_if = "Option::is_none")]
+        prefill_policy: Option<PolicyConfig>,
+        /// Optional separate policy for decode workers
+        #[serde(skip_serializing_if = "Option::is_none")]
+        decode_policy: Option<PolicyConfig>,
+        /// ZMQ service discovery address (e.g., "0.0.0.0:30001")
+        #[serde(skip_serializing_if = "Option::is_none")]
+        discovery_address: Option<String>,
+    },
 }
 
 impl RoutingMode {
     pub fn is_pd_mode(&self) -> bool {
-        matches!(self, RoutingMode::PrefillDecode { .. })
+        matches!(self, RoutingMode::PrefillDecode { .. } | RoutingMode::VllmPrefillDecode { .. })
+    }
+
+    pub fn is_vllm_pd_mode(&self) -> bool {
+        matches!(self, RoutingMode::VllmPrefillDecode { .. })
     }
 
     pub fn worker_count(&self) -> usize {
@@ -116,6 +158,13 @@ impl RoutingMode {
                 decode_urls,
                 ..
             } => prefill_urls.len() + decode_urls.len(),
+            RoutingMode::VllmPrefillDecode {
+                prefill_urls,
+                decode_urls,
+                ..
+            } => prefill_urls.len() + decode_urls.len(),
+            // OpenAI mode represents a single upstream
+            RoutingMode::OpenAI { .. } => 1,
         }
     }
 
@@ -124,6 +173,9 @@ impl RoutingMode {
     pub fn get_prefill_policy<'a>(&'a self, main_policy: &'a PolicyConfig) -> &'a PolicyConfig {
         match self {
             RoutingMode::PrefillDecode { prefill_policy, .. } => {
+                prefill_policy.as_ref().unwrap_or(main_policy)
+            }
+            RoutingMode::VllmPrefillDecode { prefill_policy, .. } => {
                 prefill_policy.as_ref().unwrap_or(main_policy)
             }
             _ => main_policy,
@@ -135,6 +187,9 @@ impl RoutingMode {
     pub fn get_decode_policy<'a>(&'a self, main_policy: &'a PolicyConfig) -> &'a PolicyConfig {
         match self {
             RoutingMode::PrefillDecode { decode_policy, .. } => {
+                decode_policy.as_ref().unwrap_or(main_policy)
+            }
+            RoutingMode::VllmPrefillDecode { decode_policy, .. } => {
                 decode_policy.as_ref().unwrap_or(main_policy)
             }
             _ => main_policy,
@@ -222,7 +277,7 @@ impl Default for DiscoveryConfig {
             selector: HashMap::new(),
             prefill_selector: HashMap::new(),
             decode_selector: HashMap::new(),
-            bootstrap_port_annotation: "vllm.ai/bootstrap-port".to_string(),
+            bootstrap_port_annotation: "sglang.ai/bootstrap-port".to_string(),
         }
     }
 }
@@ -363,6 +418,7 @@ impl Default for RouterConfig {
             connection_mode: ConnectionMode::Http,
             model_path: None,
             tokenizer_path: None,
+            history_backend: default_history_backend(),
         }
     }
 }
@@ -387,6 +443,8 @@ impl RouterConfig {
         match self.mode {
             RoutingMode::Regular { .. } => "regular",
             RoutingMode::PrefillDecode { .. } => "prefill_decode",
+            RoutingMode::VllmPrefillDecode { .. } => "vllm_prefill_decode",
+            RoutingMode::OpenAI { .. } => "openai",
         }
     }
 
@@ -483,31 +541,9 @@ mod tests {
             policy: PolicyConfig::Random,
             host: "0.0.0.0".to_string(),
             port: 8080,
-            max_payload_size: 1024,
-            request_timeout_secs: 30,
-            worker_startup_timeout_secs: 60,
-            worker_startup_check_interval_secs: 5,
-            dp_aware: false,
-            api_key: None,
-            discovery: Some(DiscoveryConfig::default()),
-            metrics: Some(MetricsConfig::default()),
             log_dir: Some("/var/log".to_string()),
             log_level: Some("debug".to_string()),
-            request_id_headers: None,
-            max_concurrent_requests: 64,
-            cors_allowed_origins: vec![],
-            retry: RetryConfig::default(),
-            circuit_breaker: CircuitBreakerConfig::default(),
-            disable_retries: false,
-            disable_circuit_breaker: false,
-            health_check: HealthCheckConfig::default(),
-            enable_igw: false,
-            queue_size: 100,
-            queue_timeout_secs: 60,
-            rate_limit_tokens_per_second: None,
-            connection_mode: ConnectionMode::Http,
-            model_path: None,
-            tokenizer_path: None,
+            ..Default::default()
         };
 
         let json = serde_json::to_string(&config).unwrap();
@@ -516,8 +552,11 @@ mod tests {
         assert_eq!(config.host, deserialized.host);
         assert_eq!(config.port, deserialized.port);
         assert_eq!(config.max_payload_size, deserialized.max_payload_size);
-        assert!(deserialized.discovery.is_some());
-        assert!(deserialized.metrics.is_some());
+        assert_eq!(config.log_dir, deserialized.log_dir);
+        assert_eq!(config.log_level, deserialized.log_level);
+        // discovery and metrics are None in Default implementation
+        assert!(deserialized.discovery.is_none());
+        assert!(deserialized.metrics.is_none());
     }
 
     // ============= RoutingMode Tests =============
@@ -701,13 +740,13 @@ mod tests {
         assert!(config.selector.is_empty());
         assert!(config.prefill_selector.is_empty());
         assert!(config.decode_selector.is_empty());
-        assert_eq!(config.bootstrap_port_annotation, "vllm.ai/bootstrap-port");
+        assert_eq!(config.bootstrap_port_annotation, "sglang.ai/bootstrap-port");
     }
 
     #[test]
     fn test_discovery_config_with_selectors() {
         let mut selector = HashMap::new();
-        selector.insert("app".to_string(), "vllm".to_string());
+        selector.insert("app".to_string(), "sglang".to_string());
         selector.insert("role".to_string(), "worker".to_string());
 
         let config = DiscoveryConfig {
@@ -725,7 +764,7 @@ mod tests {
         assert_eq!(config.namespace, Some("default".to_string()));
         assert_eq!(config.port, 9000);
         assert_eq!(config.selector.len(), 2);
-        assert_eq!(config.selector.get("app"), Some(&"vllm".to_string()));
+        assert_eq!(config.selector.get("app"), Some(&"sglang".to_string()));
     }
 
     #[test]
@@ -923,14 +962,14 @@ mod tests {
             api_key: None,
             discovery: Some(DiscoveryConfig {
                 enabled: true,
-                namespace: Some("vllm".to_string()),
+                namespace: Some("sglang".to_string()),
                 ..Default::default()
             }),
             metrics: Some(MetricsConfig {
                 port: 9090,
                 host: "0.0.0.0".to_string(),
             }),
-            log_dir: Some("/var/log/vllm".to_string()),
+            log_dir: Some("/var/log/sglang".to_string()),
             log_level: Some("info".to_string()),
             request_id_headers: None,
             max_concurrent_requests: 64,
@@ -947,6 +986,7 @@ mod tests {
             connection_mode: ConnectionMode::Http,
             model_path: None,
             tokenizer_path: None,
+            history_backend: default_history_backend(),
         };
 
         assert!(config.mode.is_pd_mode());
@@ -959,7 +999,7 @@ mod tests {
     #[test]
     fn test_full_regular_mode_config() {
         let mut selector = HashMap::new();
-        selector.insert("app".to_string(), "vllm".to_string());
+        selector.insert("app".to_string(), "sglang".to_string());
 
         let config = RouterConfig {
             mode: RoutingMode::Regular {
@@ -1010,6 +1050,7 @@ mod tests {
             connection_mode: ConnectionMode::Http,
             model_path: None,
             tokenizer_path: None,
+            history_backend: default_history_backend(),
         };
 
         assert!(!config.mode.is_pd_mode());
@@ -1052,7 +1093,7 @@ mod tests {
                 port: 9999,
                 host: "::".to_string(), // IPv6 any
             }),
-            log_dir: Some("/opt/logs/vllm".to_string()),
+            log_dir: Some("/opt/logs/sglang".to_string()),
             log_level: Some("trace".to_string()),
             request_id_headers: None,
             max_concurrent_requests: 64,
@@ -1069,6 +1110,7 @@ mod tests {
             connection_mode: ConnectionMode::Http,
             model_path: None,
             tokenizer_path: None,
+            history_backend: default_history_backend(),
         };
 
         assert!(config.has_service_discovery());

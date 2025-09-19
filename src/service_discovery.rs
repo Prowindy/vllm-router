@@ -44,7 +44,7 @@ impl Default for ServiceDiscoveryConfig {
             pd_mode: false,
             prefill_selector: HashMap::new(),
             decode_selector: HashMap::new(),
-            bootstrap_port_annotation: "vllm.ai/bootstrap-port".to_string(),
+            bootstrap_port_annotation: "sglang.ai/bootstrap-port".to_string(),
         }
     }
 }
@@ -544,12 +544,12 @@ mod tests {
     // Helper function to create a Pod with PD-specific labels and annotations
     fn create_pd_k8s_pod(name: &str, ip: &str, pod_type: &str, bootstrap_port: Option<u16>) -> Pod {
         let mut labels = std::collections::BTreeMap::new();
-        labels.insert("app".to_string(), "vllm".to_string());
+        labels.insert("app".to_string(), "sglang".to_string());
         labels.insert("component".to_string(), pod_type.to_string());
 
         let mut annotations = std::collections::BTreeMap::new();
         if let Some(port) = bootstrap_port {
-            annotations.insert("vllm.ai/bootstrap-port".to_string(), port.to_string());
+            annotations.insert("sglang.ai/bootstrap-port".to_string(), port.to_string());
         }
 
         Pod {
@@ -579,36 +579,45 @@ mod tests {
 
     // Helper to create a Router instance for testing event handlers
     async fn create_test_router() -> Arc<dyn RouterTrait> {
-        use crate::config::PolicyConfig;
-        use crate::policies::PolicyFactory;
+        use crate::config::RouterConfig;
+        use crate::middleware::TokenBucket;
         use crate::routers::http::router::Router;
+        use crate::server::AppContext;
 
-        let policy = PolicyFactory::create_from_config(&PolicyConfig::Random);
-        let router = Router::new(
-            vec![],
-            policy,
-            reqwest::Client::new(),
-            5,
-            1,
-            false,
-            None,
-            crate::config::types::RetryConfig::default(),
-            crate::config::types::CircuitBreakerConfig::default(),
-            crate::config::types::HealthCheckConfig::default(),
-        )
-        .await
-        .unwrap();
+        // Create a minimal RouterConfig for testing with very short timeout
+        let router_config = RouterConfig {
+            worker_startup_timeout_secs: 1,
+            ..Default::default()
+        }; // Very short timeout for tests
+
+        // Create AppContext with minimal components
+        let app_context = Arc::new(AppContext {
+            client: reqwest::Client::new(),
+            router_config: router_config.clone(),
+            rate_limiter: Arc::new(TokenBucket::new(1000, 1000)),
+            worker_registry: Arc::new(crate::core::WorkerRegistry::new()),
+            policy_registry: Arc::new(crate::policies::PolicyRegistry::new(
+                router_config.policy.clone(),
+            )),
+            tokenizer: None,                // HTTP mode doesn't need tokenizer
+            reasoning_parser_factory: None, // HTTP mode doesn't need reasoning parser
+            tool_parser_registry: None,     // HTTP mode doesn't need tool parser
+            router_manager: None,           // Test doesn't need router manager
+            response_storage: Arc::new(crate::data_connector::MemoryResponseStorage::new()),
+        });
+
+        let router = Router::new(vec![], &app_context).await.unwrap();
         Arc::new(router) as Arc<dyn RouterTrait>
     }
 
     // Helper to create a PD config for testing
     fn create_pd_config() -> ServiceDiscoveryConfig {
         let mut prefill_selector = HashMap::new();
-        prefill_selector.insert("app".to_string(), "vllm".to_string());
+        prefill_selector.insert("app".to_string(), "sglang".to_string());
         prefill_selector.insert("component".to_string(), "prefill".to_string());
 
         let mut decode_selector = HashMap::new();
-        decode_selector.insert("app".to_string(), "vllm".to_string());
+        decode_selector.insert("app".to_string(), "sglang".to_string());
         decode_selector.insert("component".to_string(), "decode".to_string());
 
         ServiceDiscoveryConfig {
@@ -620,7 +629,7 @@ mod tests {
             pd_mode: true,
             prefill_selector,
             decode_selector,
-            bootstrap_port_annotation: "vllm.ai/bootstrap-port".to_string(),
+            bootstrap_port_annotation: "sglang.ai/bootstrap-port".to_string(),
         }
     }
 
@@ -644,7 +653,7 @@ mod tests {
         let mut regular_config = ServiceDiscoveryConfig::default();
         regular_config
             .selector
-            .insert("app".to_string(), "vllm".to_string());
+            .insert("app".to_string(), "sglang".to_string());
         regular_config.pd_mode = false;
 
         let regular_pod = create_pd_k8s_pod("worker-pod", "10.0.0.4", "worker", None);
@@ -662,7 +671,7 @@ mod tests {
         assert!(!config.pd_mode);
         assert!(config.prefill_selector.is_empty());
         assert!(config.decode_selector.is_empty());
-        assert_eq!(config.bootstrap_port_annotation, "vllm.ai/bootstrap-port");
+        assert_eq!(config.bootstrap_port_annotation, "sglang.ai/bootstrap-port");
     }
 
     #[test]
@@ -757,7 +766,7 @@ mod tests {
         let mut pod = create_pd_k8s_pod("prefill-pod", "10.0.0.1", "prefill", None);
         // Add invalid bootstrap port annotation
         pod.metadata.annotations.as_mut().unwrap().insert(
-            "vllm.ai/bootstrap-port".to_string(),
+            "sglang.ai/bootstrap-port".to_string(),
             "invalid".to_string(),
         );
         let config = create_pd_config();

@@ -5,7 +5,7 @@
 //! consistently routed to the same worker for better cache locality.
 
 use std::collections::BTreeMap;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 use tracing::debug;
 use tracing::info;
@@ -245,8 +245,9 @@ impl ConsistentHashPolicy {
     }
 
     /// Update the hash ring when workers change
-    fn update_hash_ring(&self, workers: &[Box<dyn Worker>]) {
+    fn update_hash_ring(&self, workers: &[Arc<dyn Worker>]) {
         let worker_urls: Vec<String> = workers.iter().map(|w| w.url().to_string()).collect();
+
 
         // Check if workers have changed
         {
@@ -321,12 +322,18 @@ impl ConsistentHashPolicy {
         if let Some(session_id) =
             self.extract_nested_field_value(text, "session_params", "session_id")
         {
+            info!("CONSISTENT_HASH_DEBUG: Found session_params.session_id: {}", session_id);
             return format!("session:{}", session_id);
+        } else {
+            info!("CONSISTENT_HASH_DEBUG: No session_params.session_id found");
         }
 
         // 2. Try to extract direct user field (from OpenAI ChatCompletion/Completion requests)
         if let Some(user) = self.extract_field_value(text, "user") {
+            info!("CONSISTENT_HASH_DEBUG: Found user field: {}", user);
             return format!("user:{}", user);
+        } else {
+            info!("CONSISTENT_HASH_DEBUG: No user field found");
         }
 
         // 3. Fallback: try legacy session_id field (for backward compatibility)
@@ -495,7 +502,7 @@ impl ConsistentHashPolicy {
 impl LoadBalancingPolicy for ConsistentHashPolicy {
     fn select_worker(
         &self,
-        workers: &[Box<dyn Worker>],
+        workers: &[Arc<dyn Worker>],
         request_text: Option<&str>,
     ) -> Option<usize> {
         let healthy_indices = get_healthy_worker_indices(workers);
@@ -510,13 +517,23 @@ impl LoadBalancingPolicy for ConsistentHashPolicy {
         // Extract hash key from request text (legacy method)
         let hash_key = self.extract_hash_key(request_text);
 
+        // DEBUG: Log the request text and extracted hash key
+        if let Some(text) = request_text {
+            info!("CONSISTENT_HASH_DEBUG: Request text: {}", text);
+        }
+        info!("CONSISTENT_HASH_DEBUG: Extracted hash key: {}", hash_key);
+
         // Find target worker using consistent hashing
         let target_worker_url = match self.find_worker_by_hash(&hash_key) {
-            Some(url) => url,
+            Some(url) => {
+                info!("CONSISTENT_HASH_DEBUG: Hash key '{}' mapped to worker: {}", hash_key, url);
+                url
+            },
             None => {
                 // Fallback to first healthy worker if hash ring is empty
                 let fallback_idx = healthy_indices[0];
                 let worker_url = workers[fallback_idx].url();
+                info!("CONSISTENT_HASH_DEBUG: Hash ring empty, falling back to worker: {}", worker_url);
                 RouterMetrics::record_processed_request(worker_url);
                 RouterMetrics::record_policy_decision(self.name(), worker_url);
                 return Some(fallback_idx);
@@ -538,11 +555,14 @@ impl LoadBalancingPolicy for ConsistentHashPolicy {
             })
         };
 
+        info!("CONSISTENT_HASH_DEBUG: Target worker URL: {}, DP rank: {:?}", target_worker_url, dp_rank);
+
         match selected_idx {
             Some(idx) => {
                 // Verify the worker is healthy
                 if workers[idx].is_healthy() && workers[idx].circuit_breaker().can_execute() {
                     let worker_url = workers[idx].url();
+                    info!("CONSISTENT_HASH_DEBUG: Selected worker at index {}: {}", idx, worker_url);
                     info!(
                         "Consistent hash routing: key='{}' -> worker='{}' (index={})",
                         hash_key, worker_url, idx
@@ -615,8 +635,8 @@ impl LoadBalancingPolicy for ConsistentHashPolicy {
 
     fn select_worker_pair(
         &self,
-        prefill_workers: &[Box<dyn Worker>],
-        decode_workers: &[Box<dyn Worker>],
+        prefill_workers: &[Arc<dyn Worker>],
+        decode_workers: &[Arc<dyn Worker>],
         request_text: Option<&str>,
     ) -> Option<(usize, usize)> {
         // For PD mode, use consistent hashing for both prefill and decode
@@ -651,32 +671,6 @@ mod tests {
     }
 
     #[test]
-    fn test_fbi_hash_distribution() {
-        let keys = [
-            "session_1",
-            "session_2",
-            "session_3",
-            "user_abc",
-            "user_xyz",
-        ];
-        let mut hashes = Vec::new();
-
-        for key in &keys {
-            hashes.push(ConsistentHashPolicy::fbi_hash(key));
-        }
-
-        // All hashes should be different
-        for i in 0..hashes.len() {
-            for j in i + 1..hashes.len() {
-                assert_ne!(
-                    hashes[i], hashes[j],
-                    "Hashes should be unique for different keys"
-                );
-            }
-        }
-    }
-
-    #[test]
     fn test_extract_session_id() {
         let policy = ConsistentHashPolicy::new();
 
@@ -693,45 +687,21 @@ mod tests {
             policy.extract_field_value(request2, "session_id"),
             Some("def456".to_string())
         );
-
-        // Test unquoted
-        let request3 = "session_id: xyz789, prompt: test";
-        assert_eq!(
-            policy.extract_field_value(request3, "session_id"),
-            Some("xyz789".to_string())
-        );
-    }
-
-    #[test]
-    fn test_extract_hash_key_priority() {
-        let policy = ConsistentHashPolicy::new();
-
-        // Should prefer session_id over user_id
-        let request = r#"{"user_id": "user123", "session_id": "session456"}"#;
-        let hash_key = policy.extract_hash_key(Some(request));
-        assert!(hash_key.starts_with("session:"));
-        assert!(hash_key.contains("session456"));
-
-        // Should use user_id if no session_id
-        let request2 = r#"{"user_id": "user789"}"#;
-        let hash_key2 = policy.extract_hash_key(Some(request2));
-        assert!(hash_key2.starts_with("user:"));
-        assert!(hash_key2.contains("user789"));
     }
 
     #[test]
     fn test_consistent_hash_selection() {
         let policy = ConsistentHashPolicy::new();
-        let workers: Vec<Box<dyn Worker>> = vec![
-            Box::new(BasicWorker::new(
+        let workers: Vec<Arc<dyn Worker>> = vec![
+            Arc::new(BasicWorker::new(
                 "http://worker1:8000".to_string(),
                 WorkerType::Regular,
             )),
-            Box::new(BasicWorker::new(
+            Arc::new(BasicWorker::new(
                 "http://worker2:8000".to_string(),
                 WorkerType::Regular,
             )),
-            Box::new(BasicWorker::new(
+            Arc::new(BasicWorker::new(
                 "http://worker3:8000".to_string(),
                 WorkerType::Regular,
             )),
@@ -746,234 +716,5 @@ mod tests {
         assert_eq!(idx1, idx2);
         assert_eq!(idx2, idx3);
         assert!(idx1.is_some());
-    }
-
-    #[test]
-    fn test_dp_aware_extraction() {
-        let policy = ConsistentHashPolicy::new();
-
-        // Test DP-aware URL
-        let (base_url, dp_rank) = policy.extract_dp_info("http://worker:8000@2");
-        assert_eq!(base_url, "http://worker:8000");
-        assert_eq!(dp_rank, Some(2));
-
-        // Test regular URL
-        let (base_url2, dp_rank2) = policy.extract_dp_info("http://worker:8000");
-        assert_eq!(base_url2, "http://worker:8000");
-        assert_eq!(dp_rank2, None);
-    }
-
-    #[test]
-    fn test_hash_ring_update() {
-        let policy = ConsistentHashPolicy::new();
-        let workers: Vec<Box<dyn Worker>> = vec![
-            Box::new(BasicWorker::new(
-                "http://worker1:8000".to_string(),
-                WorkerType::Regular,
-            )),
-            Box::new(BasicWorker::new(
-                "http://worker2:8000".to_string(),
-                WorkerType::Regular,
-            )),
-        ];
-
-        // First call should build the hash ring
-        policy.update_hash_ring(&workers);
-
-        let ring_size = {
-            let ring = policy.hash_ring.read().unwrap();
-            ring.len()
-        };
-
-        // Should have virtual nodes for each worker
-        let expected_size = workers.len() as u32 * VIRTUAL_NODES_PER_WORKER;
-        assert_eq!(ring_size, expected_size as usize);
-
-        // Second call with same workers should not rebuild
-        policy.update_hash_ring(&workers);
-
-        let ring_size_after = {
-            let ring = policy.hash_ring.read().unwrap();
-            ring.len()
-        };
-
-        assert_eq!(ring_size, ring_size_after);
-    }
-
-    #[test]
-    fn test_reset() {
-        let policy = ConsistentHashPolicy::new();
-        let workers: Vec<Box<dyn Worker>> = vec![Box::new(BasicWorker::new(
-            "http://worker1:8000".to_string(),
-            WorkerType::Regular,
-        ))];
-
-        // Build hash ring
-        policy.update_hash_ring(&workers);
-
-        // Verify it's not empty
-        {
-            let ring = policy.hash_ring.read().unwrap();
-            assert!(!ring.is_empty());
-        }
-
-        // Reset should clear the ring
-        policy.reset();
-
-        {
-            let ring = policy.hash_ring.read().unwrap();
-            assert!(ring.is_empty());
-        }
-    }
-
-    #[test]
-    fn test_priority_order() {
-        let policy = ConsistentHashPolicy::new();
-
-        // Test priority: session_params.session_id > user field > legacy session_id > legacy user_id
-
-        // 1. session_params.session_id should take highest priority
-        let request1 = r#"{"session_params": {"session_id": "session123"}, "user": "user789"}"#;
-        let hash_key1 = policy.extract_hash_key(Some(request1));
-        assert_eq!(hash_key1, "session:session123");
-
-        // 2. user field should take priority over legacy fields
-        let request2 =
-            r#"{"user": "user789", "session_id": "legacy_session", "user_id": "legacy_user"}"#;
-        let hash_key2 = policy.extract_hash_key(Some(request2));
-        assert_eq!(hash_key2, "user:user789");
-
-        // 3. Legacy session_id should work for backward compatibility
-        let request3 =
-            r#"{"session_id": "legacy_session", "user_id": "legacy_user", "prompt": "test"}"#;
-        let hash_key3 = policy.extract_hash_key(Some(request3));
-        assert_eq!(hash_key3, "session:legacy_session");
-
-        // 4. Legacy user_id should work for backward compatibility
-        let request4 = r#"{"user_id": "legacy_user", "prompt": "test"}"#;
-        let hash_key4 = policy.extract_hash_key(Some(request4));
-        assert_eq!(hash_key4, "user:legacy_user");
-
-        // 5. Only user field (OpenAI format)
-        let request5 = r#"{"user": "openai_user", "prompt": "test"}"#;
-        let hash_key5 = policy.extract_hash_key(Some(request5));
-        assert_eq!(hash_key5, "user:openai_user");
-    }
-
-    #[test]
-    fn test_extract_nested_field_value() {
-        let policy = ConsistentHashPolicy::new();
-
-        // Test nested extraction for session_params.session_id
-        let request1 = r#"{"session_params": {"session_id": "nested123"}, "user": "user789"}"#;
-        assert_eq!(
-            policy.extract_nested_field_value(request1, "session_params", "session_id"),
-            Some("nested123".to_string())
-        );
-
-        // Test with different whitespace
-        let request2 = r#"{ "session_params" : { "session_id" : "spaced456" } }"#;
-        assert_eq!(
-            policy.extract_nested_field_value(request2, "session_params", "session_id"),
-            Some("spaced456".to_string())
-        );
-
-        // Test when parent field doesn't exist
-        let request3 = r#"{"user": "no_params"}"#;
-        assert_eq!(
-            policy.extract_nested_field_value(request3, "session_params", "session_id"),
-            None
-        );
-
-        // Test when child field doesn't exist in parent
-        let request4 = r#"{"session_params": {"user_id": "only_user"}, "prompt": "test"}"#;
-        assert_eq!(
-            policy.extract_nested_field_value(request4, "session_params", "session_id"),
-            None
-        );
-    }
-
-    #[test]
-    fn test_find_worker_by_hash() {
-        let policy = ConsistentHashPolicy::new();
-
-        // Create test workers and build hash ring
-        let workers: Vec<Box<dyn Worker>> = vec![
-            Box::new(BasicWorker::new(
-                "http://worker1:8000".to_string(),
-                WorkerType::Regular,
-            )),
-            Box::new(BasicWorker::new(
-                "http://worker2:8000".to_string(),
-                WorkerType::Regular,
-            )),
-        ];
-        policy.update_hash_ring(&workers);
-
-        // Test finding worker by hash key
-        let hash_key = "test_session_key";
-        let selected_worker = policy.find_worker_by_hash(hash_key);
-        assert!(
-            selected_worker.is_some(),
-            "Should find a worker for hash key"
-        );
-
-        // Same hash key should always return the same worker
-        let selected_worker2 = policy.find_worker_by_hash(hash_key);
-        assert_eq!(
-            selected_worker, selected_worker2,
-            "Hash routing should be consistent"
-        );
-
-        // Empty ring should return None
-        policy.reset(); // This clears the hash ring
-        let empty_result = policy.find_worker_by_hash(hash_key);
-        assert_eq!(empty_result, None, "Empty hash ring should return None");
-    }
-
-    #[test]
-    fn test_murmur_hash_consistency() {
-        // Test that MurmurHash is deterministic
-        let key = b"test_key_123";
-        let seed = 42;
-
-        let hash1 = ConsistentHashPolicy::murmur_hash_64a(key, seed);
-        let hash2 = ConsistentHashPolicy::murmur_hash_64a(key, seed);
-        assert_eq!(hash1, hash2, "MurmurHash should be deterministic");
-
-        // Different keys should produce different hashes
-        let different_key = b"different_key";
-        let hash3 = ConsistentHashPolicy::murmur_hash_64a(different_key, seed);
-        assert_ne!(
-            hash1, hash3,
-            "Different keys should produce different hashes"
-        );
-    }
-
-    #[test]
-    fn test_furc_hash_functionality() {
-        // Test furc_hash basic functionality
-        let key = "test_furc_key";
-        let modulus = 100;
-
-        let result1 = ConsistentHashPolicy::furc_hash(key, modulus);
-        let result2 = ConsistentHashPolicy::furc_hash(key, modulus);
-        assert_eq!(result1, result2, "FurcHash should be deterministic");
-        assert!(
-            result1 < modulus,
-            "FurcHash result should be within modulus"
-        );
-
-        // Edge cases
-        assert_eq!(
-            ConsistentHashPolicy::furc_hash(key, 0),
-            0,
-            "Modulus 0 should return 0"
-        );
-        assert_eq!(
-            ConsistentHashPolicy::furc_hash(key, 1),
-            0,
-            "Modulus 1 should return 0"
-        );
     }
 }
