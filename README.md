@@ -1,12 +1,36 @@
 # VLLM Router
 
-VLLM router is a standalone Rust module that enables data parallelism across VLLM instances, providing high-performance request routing and advanced load balancing. The router supports multiple load balancing algorithms including cache-aware, power of two, random, and round robin, and acts as a specialized load balancer for prefill-decode disaggregated serving architectures.
+A high-performance request routing system for vLLM deployments, providing advanced load balancing and specialized routing for modern LLM serving architectures.
 
-## Documentation
+## 🚀 Release Roadmap
 
-- **User Guide**: [docs.vllm.ai/advanced_features/router.html](https://docs.vllm.ai/advanced_features/router.html)
+- **September 2025**: Internal testing with select vLLM developers. Core features implemented and tested:
+  - Data Parallelism-aware Routing
+  - Consistent Hash Load Balancing
+  - Prefill/Decode Disaggregation Aware Routing
+- **October 2025**: Development and testing of remaining functionalities ([progress tracking](https://docs.google.com/document/d/1d1gi5ex7yCpfMtmCQtwVcsmtOjDIevIOp8HLiA_WlPk/edit?tab=t.0))
+- **November 2025**: Evaluation for potential integration into vLLM core repository
 
-## Quick Start
+## 🏗️ Built on SGLang Router Foundation
+
+This router is adapted from the excellent [SGLang router](https://github.com/sgl-project/sglang/tree/main/sgl-router), enabling data parallelism across vLLM instances with enterprise-grade reliability and performance.
+
+## 🙏 Attribution and Acknowledgments
+
+This project builds upon the foundational work of the SGLang router developed by the SGLang team. We deeply appreciate their innovative design and open-source contribution to the LLM serving ecosystem.
+
+### Key Features Adapted from SGLang Router
+
+- **🏛️ Core Architecture**: Request routing framework and async processing patterns
+- **🔌 API Compatibility**: Seamless migration path between SGLang and vLLM ecosystems
+- **⚖️ Load Balancing**: Multiple algorithms (cache-aware, power of two, consistent hashing, random, round robin)
+- **🔀 Prefill-Decode Disaggregation**: Specialized routing for separated processing phases
+- **☸️ Service Discovery**: Kubernetes-native worker management and health monitoring
+- **🛡️ Enterprise Features**: Circuit breakers, retry logic, metrics collection, and tool parsing
+
+Both SGLang and vLLM projects use the Apache-2.0 license, enabling this collaborative adaptation. This router maintains API compatibility with SGLang router and minimizes code changes to facilitate easy ecosystem transitions and foster potential future unification.
+
+## 🚀 Quick Start
 
 ### Prerequisites
 
@@ -25,98 +49,43 @@ cargo --version
 
 **Python with pip installed**
 
-### Installation
-
-#### Option A: Build and Install Wheel (Recommended)
-```bash
-# Install build dependencies
-pip install setuptools-rust wheel build
-
-# Build the wheel package
-python -m build
-
-# Install the generated wheel
-pip install dist/*.whl
-
-# One-liner for development (rebuild + install)
-python -m build && pip install --force-reinstall dist/*.whl
-```
-
-#### Option B: Development Mode
-
-```bash
-# Currently broken
-pip install -e .
-```
-
-⚠️ **Warning**: Editable installs may suffer performance degradation. Use wheel builds for performance testing.
-
-### Basic Usage
+### Installation & Basic Usage
 
 ```bash
 # Build Rust components
-cargo build
-```
-
-#### Using the Rust Binary Directly (Alternative to Python)
-```bash
-# Build the Rust binary
 cargo build --release
+```
 
-# Launch router with worker URLs in regular mode
+### 🔧 Usage Examples
+
+#### Standard Data Parallelism Routing
+```bash
+# Launch router with data parallelism awareness
 ./target/release/vllm-router \
-    --worker-urls http://worker1:8000 http://worker2:8000
+    --worker-urls http://0.0.0.0:8000 \
+    --dp-aware --policy consistent_hash
 
-# Or use cargo run
+# Alternative: using cargo run
 cargo run --release -- \
-    --worker-urls http://worker1:8000 http://worker2:8000
+    --worker-urls http://0.0.0.0:8000 \
+    --dp-aware --policy consistent_hash
 ```
 
-#### Launch Router with Python (Original Method)
+#### Prefill-Decode Disaggregation with ZMQ Service Discovery
 ```bash
-# Launch router with worker URLs
-python -m vllm_router.launch_router \
-    --worker-urls http://worker1:8000 http://worker2:8000
+cargo run --release -- \
+    --policy consistent_hash \
+    --vllm-pd-disaggregation \
+    --vllm-discovery-address 0.0.0.0:30001 \
+    --host 0.0.0.0 \
+    --port 10001 \
+    --prefill-policy consistent_hash \
+    --decode-policy consistent_hash
 ```
 
-#### Launch Router with Worker URLs in prefill-decode mode
-```bash
-# Note that the prefill and decode URLs must be provided in the following format:
-# http://<ip>:<port> for  decode nodes
-# http://<ip>:<port> bootstrap-port for  prefill nodes, where bootstrap-port is optional
+## ⚙️ Configuration
 
-# Using Rust binary directly
-./target/release/vllm-router \
-    --pd-disaggregation \
-    --policy cache_aware \
-    --prefill http://127.0.0.1:30001 9001 \
-    --prefill http://127.0.0.2:30002 9002 \
-    --prefill http://127.0.0.3:30003 9003 \
-    --prefill http://127.0.0.4:30004 9004 \
-    --decode http://127.0.0.5:30005 \
-    --decode http://127.0.0.6:30006 \
-    --decode http://127.0.0.7:30007 \
-    --host 0.0.0.0 \
-    --port 8080
-
-# Or using Python launcher
-python -m vllm_router.launch_router \
-    --pd-disaggregation \
-    --policy cache_aware \
-    --prefill http://127.0.0.1:30001 9001 \
-    --prefill http://127.0.0.2:30002 9002 \
-    --prefill http://127.0.0.3:30003 9003 \
-    --prefill http://127.0.0.4:30004 9004 \
-    --decode http://127.0.0.5:30005 \
-    --decode http://127.0.0.6:30006 \
-    --decode http://127.0.0.7:30007 \
-    --host 0.0.0.0 \
-    --port 8080
-````
-
-## Configuration
-
-### Logging
+### 📝 Logging
 
 Enable structured logging with optional file output:
 
@@ -135,7 +104,7 @@ router = Router(
 
 Set log level with `--log-level` flag ([documentation](https://docs.vllm.ai/backend/server_arguments.html#logging)).
 
-### Metrics
+### 📊 Metrics
 
 Prometheus metrics endpoint available at `127.0.0.1:29000` by default.
 
@@ -147,9 +116,10 @@ python -m vllm_router.launch_router \
     --prometheus-port 9000
 ```
 
-### Retries and Circuit Breakers
+### 🔄 Retries and Circuit Breakers
 
-- Retries (regular router) are enabled by default with exponential backoff and jitter. You can tune them via CLI:
+#### Retry Configuration
+Retries are enabled by default with exponential backoff and jitter:
 
 ```bash
 python -m vllm_router.launch_router \
@@ -161,7 +131,8 @@ python -m vllm_router.launch_router \
   --retry-jitter-factor 0.1
 ```
 
-- Circuit Breaker defaults protect workers and auto-recover. Tune thresholds/timeouts:
+#### Circuit Breaker Configuration
+Circuit breakers protect workers and provide automatic recovery:
 
 ```bash
 python -m vllm_router.launch_router \
@@ -172,15 +143,15 @@ python -m vllm_router.launch_router \
   --cb-window-duration-secs 60
 ```
 
-Behavior summary:
-- Closed → Open after N consecutive failures (failure-threshold)
-- Open → HalfOpen after timeout (timeout-duration-secs)
-- HalfOpen → Closed after M consecutive successes (success-threshold)
-- Any failure in HalfOpen reopens immediately
+**Circuit Breaker State Machine:**
+- `Closed` → `Open` after N consecutive failures (failure-threshold)
+- `Open` → `HalfOpen` after timeout (timeout-duration-secs)
+- `HalfOpen` → `Closed` after M consecutive successes (success-threshold)
+- Any failure in `HalfOpen` reopens immediately
 
-Retry predicate (regular router): retry on 408/429/500/502/503/504, otherwise return immediately. Backoff/jitter observed between attempts.
+**Retry Policy:** Retries on HTTP status codes 408/429/500/502/503/504, with backoff/jitter between attempts.
 
-### Request ID Tracking
+### 🔍 Request ID Tracking
 
 Track requests across distributed systems with configurable headers:
 
@@ -191,11 +162,11 @@ python -m vllm_router.launch_router \
     --request-id-headers x-trace-id x-request-id
 ```
 
-Default headers: `x-request-id`, `x-correlation-id`, `x-trace-id`, `request-id`
+**Default headers:** `x-request-id`, `x-correlation-id`, `x-trace-id`, `request-id`
 
-## Advanced Features
+## 🚀 Advanced Features
 
-### Kubernetes Service Discovery
+### ☸️ Kubernetes Service Discovery
 
 Automatic worker discovery and management in Kubernetes environments.
 
@@ -206,78 +177,6 @@ python -m vllm_router.launch_router \
     --service-discovery \
     --selector app=vllm-worker role=inference \
     --service-discovery-namespace default
-```
-
-#### PD (Prefill-Decode) Mode
-
-For disaggregated prefill/decode routing:
-
-```bash
-python -m vllm_router.launch_router \
-    --pd-disaggregation \
-    --policy cache_aware \
-    --service-discovery \
-    --prefill-selector app=vllm component=prefill \
-    --decode-selector app=vllm component=decode \
-    --service-discovery-namespace vllm-system
-
-# With separate routing policies:
-python -m vllm_router.launch_router \
-    --pd-disaggregation \
-    --prefill-policy cache_aware \
-    --decode-policy power_of_two \
-    --service-discovery \
-    --prefill-selector app=vllm component=prefill \
-    --decode-selector app=vllm component=decode \
-    --service-discovery-namespace vllm-system
-
-# in lws case, such as tp16(1 leader pod, 1 worker pod)
-python -m vllm_router.launch_router \
-    --pd-disaggregation \
-    --policy cache_aware \
-    --service-discovery \
-    --prefill-selector app=vllm component=prefill role=leader\
-    --decode-selector app=vllm component=decode role=leader\
-    --service-discovery-namespace vllm-system
-```
-
-#### Kubernetes Pod Configuration
-
-**Prefill Server Pod:**
-```yaml
-apiVersion: v1
-kind: Pod
-metadata:
-  name: vllm-prefill-1
-  labels:
-    app: vllm
-    component: prefill
-  annotations:
-    vllm.ai/bootstrap-port: "9001"  # Optional: Bootstrap port
-spec:
-  containers:
-  - name: vllm
-    image: lmsys/vllm:latest
-    ports:
-    - containerPort: 8000  # Main API port
-    - containerPort: 9001  # Optional: Bootstrap port
-```
-
-**Decode Server Pod:**
-```yaml
-apiVersion: v1
-kind: Pod
-metadata:
-  name: vllm-decode-1
-  labels:
-    app: vllm
-    component: decode
-spec:
-  containers:
-  - name: vllm
-    image: lmsys/vllm:latest
-    ports:
-    - containerPort: 8000
 ```
 
 #### RBAC Configuration
@@ -315,23 +214,7 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
 ```
 
-#### Complete PD Example
-
-```bash
-python -m vllm_router.launch_router \
-    --pd-disaggregation \
-    --policy cache_aware \
-    --service-discovery \
-    --prefill-selector app=vllm component=prefill environment=production \
-    --decode-selector app=vllm component=decode environment=production \
-    --service-discovery-namespace production \
-    --host 0.0.0.0 \
-    --port 8080 \
-    --prometheus-host 0.0.0.0 \
-    --prometheus-port 9090
-```
-
-### Command Line Arguments Reference
+### 📋 Command Line Arguments Reference
 
 #### Service Discovery
 - `--service-discovery`: Enable Kubernetes service discovery
@@ -339,28 +222,7 @@ python -m vllm_router.launch_router \
 - `--service-discovery-namespace`: Kubernetes namespace to watch
 - `--selector`: Label selectors for regular mode (format: `key1=value1 key2=value2`)
 
-#### PD Mode
-- `--pd-disaggregation`: Enable Prefill-Decode disaggregated mode
-- `--prefill`: Initial prefill server (format: `URL BOOTSTRAP_PORT`)
-- `--decode`: Initial decode server URL
-- `--prefill-selector`: Label selector for prefill pods
-- `--decode-selector`: Label selector for decode pods
-- `--policy`: Routing policy (`cache_aware`, `random`, `power_of_two`, `round_robin`)
-- `--prefill-policy`: Separate routing policy for prefill nodes (optional, overrides `--policy` for prefill)
-- `--decode-policy`: Separate routing policy for decode nodes (optional, overrides `--policy` for decode)
-
-## Development
-
-### Build Process
-
-```bash
-# Build Rust project
-cargo build
-
-# Build Python binding (see Installation section above)
-```
-
-**Note**: When modifying Rust code, you must rebuild the wheel for changes to take effect.
+## 🛠️ Development
 
 ### Troubleshooting
 
@@ -373,30 +235,40 @@ Set `rust-analyzer.linkedProjects` to the absolute path of `Cargo.toml`:
 }
 ```
 
-### CI/CD Pipeline
+### 🔄 CI/CD Pipeline
 
 The continuous integration pipeline includes comprehensive testing, benchmarking, and publishing:
 
 #### Build & Test
-
-1. **Build Wheels**: Uses `cibuildwheel` for manylinux x86_64 packages
-2. **Build Source Distribution**: Creates source distribution for pip fallback
-3. **Rust HTTP Server Benchmarking**: Performance testing of router overhead
-4. **Basic Inference Testing**: End-to-end validation through the router
-5. **PD Disaggregation Testing**: Benchmark and sanity checks for prefill-decode load balancing
+1. **🏗️ Build Wheels**: Uses `cibuildwheel` for manylinux x86_64 packages
+2. **📦 Build Source Distribution**: Creates source distribution for pip fallback
+3. **⚡ Rust HTTP Server Benchmarking**: Performance testing of router overhead
+4. **🧪 Basic Inference Testing**: End-to-end validation through the router
+5. **🔀 PD Disaggregation Testing**: Benchmark and sanity checks for prefill-decode load balancing
 
 #### Publishing
-- **PyPI Publishing**: Wheels and source distributions are published only when the version changes in `pyproject.toml`
-- **Container Images**: Docker images published using `/docker/Dockerfile.router`
+- **🐍 PyPI Publishing**: Wheels and source distributions published when version changes in `pyproject.toml`
+- **🐳 Container Images**: Docker images published using `/docker/Dockerfile.router`
 
-## Features
+## ✨ Key Features
+
+### 🚀 Performance & Scalability
 - **High Performance**: Rust-based routing with connection pooling and optimized request handling
-- **Advanced Load Balancing**: Multiple algorithms including:
-  - **Cache-Aware**: Intelligent routing based on cache locality for optimal performance
-  - **Power of Two**: Chooses the less loaded of two randomly selected workers
-  - **Random**: Distributes requests randomly across available workers
-  - **Round Robin**: Sequential distribution across workers in rotation
-- **Prefill-Decode Disaggregation**: Specialized load balancing for separated prefill and decode servers
-- **Service Discovery**: Automatic Kubernetes worker discovery and health management
-- **Monitoring**: Comprehensive Prometheus metrics and structured logging
 - **Scalability**: Handles thousands of concurrent connections with efficient resource utilization
+
+### ⚖️ Advanced Load Balancing
+- **🧠 Cache-Aware**: Intelligent routing based on cache locality for optimal performance
+- **⚡ Power of Two**: Chooses the less loaded of two randomly selected workers
+- **🎲 Random**: Distributes requests randomly across available workers
+- **🔄 Round Robin**: Sequential distribution across workers in rotation
+- **🏗️ Consistent Hash**: Session-aware routing for stateful workloads
+
+### 🔀 Specialized Routing
+- **Prefill-Decode Disaggregation**: Specialized load balancing for separated prefill and decode servers
+- **Data Parallelism Awareness**: Optimized routing for distributed training and inference
+
+### 🛡️ Enterprise Grade
+- **☸️ Service Discovery**: Automatic Kubernetes worker discovery and health management
+- **📊 Monitoring**: Comprehensive Prometheus metrics and structured logging
+- **🔧 Circuit Breakers**: Automatic fault tolerance and recovery
+- **🔄 Retry Logic**: Intelligent request retry with exponential backoff

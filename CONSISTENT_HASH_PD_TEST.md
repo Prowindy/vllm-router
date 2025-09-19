@@ -42,68 +42,82 @@ cargo build --release
 
 ## Test Setup Commands
 
-### Step 1: Start Prefill Workers (2 instances)
+### Step 1: Start Prefill Workers (4 instances)
 
 **Terminal 1 - Prefill Worker 1:**
 ```bash
-source ~/uv_env/vllm/bin/activate
-cd /home/ubuntu/gitrepos/vllm
+source ~/uv_env/vllm/bin/activate && \
+cd /home/ubuntu/gitrepos/vllm && \
+CUDA_VISIBLE_DEVICES=0 vllm serve \
+  meta-llama/Meta-Llama-3.1-8B-Instruct \
+  --port 20000 \
+  --host 0.0.0.0 \
+  --kv-transfer-config '{"kv_connector":"P2pNcclConnector","kv_role":"kv_producer","kv_buffer_size":"1e1","kv_port":"21001","kv_connector_extra_config":{"proxy_ip":"0.0.0.0","proxy_port":"30001","http_port":"20000","send_type":"PUT_ASYNC","nccl_num_channels":"16"}}'
 
-CUDA_VISIBLE_DEVICES=0,1 VLLM_USE_PRECOMPILED=1 \
-python -m vllm.entrypoints.openai.api_server \
-  --model meta-llama/Meta-Llama-3.1-8B-Instruct \
-  --tensor-parallel-size 2 \
+source ~/uv_env/vllm/bin/activate && \
+cd /home/ubuntu/gitrepos/vllm && \
+CUDA_VISIBLE_DEVICES=1 vllm serve \
+  meta-llama/Meta-Llama-3.1-8B-Instruct \
   --port 20001 \
   --host 0.0.0.0 \
-  --disable-log-requests \
-  --enable-prefix-caching
-```
+  --kv-transfer-config '{"kv_connector":"P2pNcclConnector","kv_role":"kv_producer","kv_buffer_size":"1e1","kv_port":"21002","kv_connector_extra_config":{"proxy_ip":"0.0.0.0","proxy_port":"30001","http_port":"20001","send_type":"PUT_ASYNC","nccl_num_channels":"16"}}'
 
-**Terminal 2 - Prefill Worker 2:**
-```bash
-source ~/uv_env/vllm/bin/activate
-cd /home/ubuntu/gitrepos/vllm
-
-CUDA_VISIBLE_DEVICES=2,3 VLLM_USE_PRECOMPILED=1 \
-python -m vllm.entrypoints.openai.api_server \
-  --model meta-llama/Meta-Llama-3.1-8B-Instruct \
-  --tensor-parallel-size 2 \
+source ~/uv_env/vllm/bin/activate && \
+cd /home/ubuntu/gitrepos/vllm && \
+CUDA_VISIBLE_DEVICES=2 vllm serve \
+  meta-llama/Meta-Llama-3.1-8B-Instruct \
   --port 20002 \
   --host 0.0.0.0 \
-  --disable-log-requests \
-  --enable-prefix-caching
+  --kv-transfer-config '{"kv_connector":"P2pNcclConnector","kv_role":"kv_producer","kv_buffer_size":"1e1","kv_port":"21003","kv_connector_extra_config":{"proxy_ip":"0.0.0.0","proxy_port":"30001","http_port":"20002","send_type":"PUT_ASYNC","nccl_num_channels":"16"}}'
+
+source ~/uv_env/vllm/bin/activate && \
+cd /home/ubuntu/gitrepos/vllm && \
+CUDA_VISIBLE_DEVICES=3 vllm serve \
+  meta-llama/Meta-Llama-3.1-8B-Instruct \
+  --port 20003 \
+  --host 0.0.0.0 \
+  --kv-transfer-config '{"kv_connector":"P2pNcclConnector","kv_role":"kv_producer","kv_buffer_size":"1e1","kv_port":"21004","kv_connector_extra_config":{"proxy_ip":"0.0.0.0","proxy_port":"30001","http_port":"20003","send_type":"PUT_ASYNC","nccl_num_channels":"16"}}'
+
+
 ```
 
-### Step 2: Start Decode Workers (2 instances)
+### Step 2: Start Decode Workers (4 instances)
 
 **Terminal 3 - Decode Worker 1:**
 ```bash
-source ~/uv_env/vllm/bin/activate
-cd /home/ubuntu/gitrepos/vllm
-
-CUDA_VISIBLE_DEVICES=4,5 VLLM_USE_PRECOMPILED=1 \
-python -m vllm.entrypoints.openai.api_server \
-  --model meta-llama/Meta-Llama-3.1-8B-Instruct \
-  --tensor-parallel-size 2 \
-  --port 20003 \
-  --host 0.0.0.0 \
-  --disable-log-requests \
-  --enable-prefix-caching
-```
-
-**Terminal 4 - Decode Worker 2:**
-```bash
-source ~/uv_env/vllm/bin/activate
-cd /home/ubuntu/gitrepos/vllm
-
-CUDA_VISIBLE_DEVICES=6,7 VLLM_USE_PRECOMPILED=1 \
-python -m vllm.entrypoints.openai.api_server \
-  --model meta-llama/Meta-Llama-3.1-8B-Instruct \
-  --tensor-parallel-size 2 \
+source ~/uv_env/vllm/bin/activate && \
+cd /home/ubuntu/gitrepos/vllm && \
+CUDA_VISIBLE_DEVICES=4 vllm serve \
+  meta-llama/Meta-Llama-3.1-8B-Instruct \
   --port 20004 \
   --host 0.0.0.0 \
-  --disable-log-requests \
-  --enable-prefix-caching
+  --kv-transfer-config '{"kv_connector":"P2pNcclConnector","kv_role":"kv_consumer","kv_buffer_size":"8e9","kv_port":"22005","kv_connector_extra_config":{"proxy_ip":"0.0.0.0","proxy_port":"30001","http_port":"20004","send_type":"PUT_ASYNC","nccl_num_channels":"16"}}'
+
+source ~/uv_env/vllm/bin/activate && \
+cd /home/ubuntu/gitrepos/vllm && \
+CUDA_VISIBLE_DEVICES=5 vllm serve \
+  meta-llama/Meta-Llama-3.1-8B-Instruct \
+  --port 20005 \
+  --host 0.0.0.0 \
+  --kv-transfer-config '{"kv_connector":"P2pNcclConnector","kv_role":"kv_consumer","kv_buffer_size":"8e9","kv_port":"22006","kv_connector_extra_config":{"proxy_ip":"0.0.0.0","proxy_port":"30001","http_port":"20005","send_type":"PUT_ASYNC","nccl_num_channels":"16"}}'
+
+source ~/uv_env/vllm/bin/activate && \
+cd /home/ubuntu/gitrepos/vllm && \
+CUDA_VISIBLE_DEVICES=6 vllm serve \
+  meta-llama/Meta-Llama-3.1-8B-Instruct \
+  --port 20006 \
+  --host 0.0.0.0 \
+  --kv-transfer-config '{"kv_connector":"P2pNcclConnector","kv_role":"kv_consumer","kv_buffer_size":"8e9","kv_port":"22007","kv_connector_extra_config":{"proxy_ip":"0.0.0.0","proxy_port":"30001","http_port":"20006","send_type":"PUT_ASYNC","nccl_num_channels":"16"}}'
+
+source ~/uv_env/vllm/bin/activate && \
+cd /home/ubuntu/gitrepos/vllm && \
+CUDA_VISIBLE_DEVICES=7 vllm serve \
+  meta-llama/Meta-Llama-3.1-8B-Instruct \
+  --port 20007 \
+  --host 0.0.0.0 \
+  --kv-transfer-config '{"kv_connector":"P2pNcclConnector","kv_role":"kv_consumer","kv_buffer_size":"8e9","kv_port":"22008","kv_connector_extra_config":{"proxy_ip":"0.0.0.0","proxy_port":"30001","http_port":"20007","send_type":"PUT_ASYNC","nccl_num_channels":"16"}}'
+
+
 ```
 
 ### Step 3: Wait for Workers to be Ready
@@ -120,20 +134,14 @@ curl -s http://localhost:20004/health && echo " - Decode Worker 2 Ready"
 
 **Terminal 5 - vLLM Router:**
 ```bash
-cd /home/ubuntu/gitrepos/vllm-router
+cd /home/ubuntu/gitrepos/vllm-router && cargo run --release -- \
+    --prefill-policy consistent_hash \
+    --decode-policy consistent_hash \
+    --vllm-pd-disaggregation \
+    --vllm-discovery-address 0.0.0.0:30001
+    --host 0.0.0.0 \
+    --port 10001
 
-# Method 1: Static worker configuration (if service discovery is not available)
-./target/release/vllm-router \
-  --pd-disaggregation \
-  --prefill http://0.0.0.0:20001 \
-  --prefill http://0.0.0.0:20002 \
-  --decode http://0.0.0.0:20003 \
-  --decode http://0.0.0.0:20004 \
-  --prefill-policy consistent_hash \
-  --decode-policy consistent_hash \
-  --host 0.0.0.0 \
-  --port 30000 \
-  --log-level info
 
 # Method 2: vLLM service discovery mode (if implemented)
 # ./target/release/vllm-router \
