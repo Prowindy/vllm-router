@@ -665,19 +665,10 @@ impl Worker for DPAwareWorker {
         Some(self.dp_size)
     }
 
-    async fn prepare_request(&self, mut req: serde_json::Value) -> WorkerResult<serde_json::Value> {
-        // Inject data_parallel_rank into the request
-        if let Some(map) = req.as_object_mut() {
-            map.insert(
-                "data_parallel_rank".to_string(),
-                serde_json::json!(self.dp_rank),
-            );
-            Ok(req)
-        } else {
-            Err(WorkerError::InvalidConfiguration {
-                message: "Request must be a JSON object for DP-aware routing".to_string(),
-            })
-        }
+    async fn prepare_request(&self, req: serde_json::Value) -> WorkerResult<serde_json::Value> {
+        // DP-aware routing now uses X-data-parallel-rank header instead of request body modification
+        // The header is added at the HTTP client level in router.rs
+        Ok(req)
     }
 
     fn endpoint_url(&self, route: &str) -> String {
@@ -1773,25 +1764,21 @@ mod tests {
 
         assert_eq!(prepared_req["prompt"], "Hello");
         assert_eq!(prepared_req["max_tokens"], 100);
-        assert_eq!(prepared_req["data_parallel_rank"], 3);
+        // data_parallel_rank is no longer added to request body, it's sent as X-data-parallel-rank header
+        assert!(prepared_req["data_parallel_rank"].is_null());
     }
 
     #[tokio::test]
-    async fn test_dp_aware_prepare_request_invalid() {
+    async fn test_dp_aware_prepare_request_passthrough() {
         let dp_worker =
             DPAwareWorker::new("http://worker1:8080".to_string(), 0, 4, WorkerType::Regular);
 
-        // Non-object JSON should fail
-        let invalid_req = serde_json::json!("not an object");
-        let result = dp_worker.prepare_request(invalid_req).await;
+        // Any JSON should pass through unchanged
+        let req = serde_json::json!("not an object");
+        let result = dp_worker.prepare_request(req.clone()).await;
 
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            WorkerError::InvalidConfiguration { message } => {
-                assert!(message.contains("JSON object"));
-            }
-            _ => panic!("Expected InvalidConfiguration error"),
-        }
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), req);
     }
 
     #[test]

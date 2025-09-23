@@ -740,7 +740,7 @@ impl Router {
         is_stream: bool,
         load_incremented: bool, // Whether load was incremented for this request
     ) -> Response {
-        let mut request_builder = if self.dp_aware {
+        let (mut request_builder, extracted_dp_rank) = if self.dp_aware {
             let (worker_url_prefix, dp_rank) = match Self::extract_dp_rank(worker_url) {
                 Ok(tup) => tup,
                 Err(e) => {
@@ -765,31 +765,15 @@ impl Router {
                 }
             };
 
-            // Insert the data_parallel_rank field
-            if let Some(map) = json_val.as_object_mut() {
-                map.insert(
-                    String::from("data_parallel_rank"),
-                    serde_json::json!(dp_rank),
-                );
-                debug!(
-                    "Modified request body: {}",
-                    serde_json::to_string(&json_val).unwrap_or(String::from("ERR"))
-                );
-            } else {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    "Failed to insert the data_parallel_rank field into the request body",
-                )
-                    .into_response();
-            }
+            // Use the original json_val without modification
 
-            self.client
+            (self.client
                 .post(format!("{}{}", worker_url_prefix, route))
-                .json(&json_val)
+                .json(&json_val), Some(dp_rank))
         } else {
-            self.client
+            (self.client
                 .post(format!("{}{}", worker_url, route))
-                .json(typed_req) // Use json() directly with typed request
+                .json(typed_req), None) // Use json() directly with typed request
         };
 
         // Copy all headers from original request if provided
@@ -800,6 +784,11 @@ impl Router {
                     request_builder = request_builder.header(name, value);
                 }
             }
+        }
+
+        // Add X-data-parallel-rank header for DP-aware routing
+        if let Some(dp_rank) = extracted_dp_rank {
+            request_builder = request_builder.header("X-data-parallel-rank", dp_rank.to_string());
         }
 
         let res = match request_builder.send().await {
