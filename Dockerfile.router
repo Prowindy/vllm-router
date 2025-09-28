@@ -1,11 +1,12 @@
 # Dockerfile for vllm-router
-FROM rust:1.75-bullseye as rust-builder
+FROM rustlang/rust:nightly-bullseye as rust-builder
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     build-essential \
     pkg-config \
     libssl-dev \
+    protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
